@@ -1,5 +1,8 @@
 from datetime import date, datetime, timedelta
 from backend.database.db_helper import run_query, run_command
+from backend.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Thread-local storage for tracking current order context
 _current_order_id = None
@@ -147,7 +150,7 @@ def process_demand(item_id, qty, due_date, production_time_days=0, visited=None)
         visited = set()
     
     if item_id in visited:
-        print(f"CRITICAL WARNING: Circular BOM dependency detected for item {item_id}. Skipping to prevent infinite loop.")
+        logger.warning(f"CRITICAL WARNING: Circular BOM dependency detected for item {item_id}. Skipping to prevent infinite loop.")
         return
     
     # Add current item to visited path

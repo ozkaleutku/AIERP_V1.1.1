@@ -6,5 +6,5 @@ lightgbm
 prophet
 python-dateutil
 python-dotenv
-requests
+
 pydantic

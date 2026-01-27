@@ -6,9 +6,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import pandas as pd
 from backend.database.db_helper import run_query, run_command, run_command_batch
+from backend.logger import get_logger
+
+logger = get_logger(__name__)
 
 def run_bom_explosion():
-    print("\n BOM Tablosu Parcalaniyor ve Full Safety Stock Hesaplaniyor...")
+    logger.info("BOM Tablosu Parcalaniyor ve Full Safety Stock Hesaplaniyor...")
 
     # 1. Hedef Tabloyu Temizle
     run_command("TRUNCATE TABLE calculated_full_ss_ai_temp")
@@ -16,7 +19,7 @@ def run_bom_explosion():
     # ---------------------------------------------------------
     # LEVEL 0: Mamuller (Direkt AI Tahminleri)
     # ---------------------------------------------------------
-    print("   -> Level 0 (Mamuller) isleniyor...")
+    logger.info("   -> Level 0 (Mamuller) isleniyor...")
     
     # Sadece Aktif ürünleri al, Type ve Quantity Type bilgilerini item tablosundan çek
     query_l0 = """
@@ -34,7 +37,7 @@ def run_bom_explosion():
     # Sınırsız döngü: Parçalanacak child kalmadığında otomatik durur
     while True:
         next_level = current_level + 1
-        print(f"   -> Level {next_level} hesaplaniyor...")
+        logger.info(f"   -> Level {next_level} hesaplaniyor...")
 
         # Mevcut seviyedeki ürünleri ve miktarlarını çek
         query_fetch_current = f"""
@@ -45,7 +48,7 @@ def run_bom_explosion():
         df_current = run_query(query_fetch_current)
         
         if df_current.empty:
-            print(f"      Level {current_level} bos veya tamamlandi. Parcalama tamamlandi.")
+            logger.info(f"      Level {current_level} bos veya tamamlandi. Parcalama tamamlandi.")
             break
             
         # BOM bilgisini çek
@@ -67,7 +70,7 @@ def run_bom_explosion():
         df_bom = run_query(query_bom)
         
         if df_bom.empty:
-            print(f"      Level {next_level} icin alt parca (child) bulunamadi.")
+            logger.warning(f"      Level {next_level} icin alt parca (child) bulunamadi.")
             break
             
         # ---------------------------------------------------------
@@ -121,13 +124,13 @@ def run_bom_explosion():
             # Batch insert for performance
             run_command_batch(insert_query, rows_to_insert)
             
-            print(f"      Level {next_level} tamamlandi. {len(df_final)} satir eklendi.")
+            logger.info(f"      Level {next_level} tamamlandi. {len(df_final)} satir eklendi.")
             current_level += 1
         else:
-            print(f"       Hesaplanacak veri olusmadi.")
+            logger.info(f"       Hesaplanacak veri olusmadi.")
             break
 
-    print("TUM BOM PARCALAMA ISLEMI TAMAMLANDI!")
+    logger.info("TUM BOM PARCALAMA ISLEMI TAMAMLANDI!")
 
 if __name__ == "__main__":
     run_bom_explosion()

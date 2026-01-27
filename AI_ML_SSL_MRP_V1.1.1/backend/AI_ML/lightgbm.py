@@ -17,6 +17,9 @@ if sys.platform == 'win32':
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.database.db_helper import run_query, run_command, run_command_batch
+from backend.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Uyarıları kapat
 import warnings
@@ -27,7 +30,7 @@ def run_lightgbm_training():
     # ---------------------------------------------------------
     # 1. VERİLERİ VERİTABANINDAN ÇEK (Data Loading)
     # ---------------------------------------------------------
-    print("1. Veritabanindan Veriler Cekiliyor...")
+    logger.info("1. Veritabanindan Veriler Cekiliyor...")
     
     # A. Prophet Tahminleri
     df_prophet = run_query("SELECT * FROM prophet_table_temporary")
@@ -79,7 +82,7 @@ def run_lightgbm_training():
     # ---------------------------------------------------------
     # 2. FEATURE ENGINEERING (Gecmis Verilerden)
     # ---------------------------------------------------------
-    print("2. Ozellik Muhendisligi (Feature Engineering)...")
+    logger.info("2. Ozellik Muhendisligi (Feature Engineering)...")
 
     # A. Tuketim Istatistikleri (Aylik Bazda)
     # 1. Net Tuketimler: 'uretime_giden' ve 'satis_cikisi' her zaman tuketimdir.
@@ -128,7 +131,7 @@ def run_lightgbm_training():
     # ---------------------------------------------------------
     # 3. EGITIM SETINI HAZIRLA
     # ---------------------------------------------------------
-    print("3. Egitim Seti Hazirlaniyor...")
+    logger.info("3. Egitim Seti Hazirlaniyor...")
     
     df_train = df_inventory[['item_id', 'year', 'month', 'start_stock']].copy()
     
@@ -159,7 +162,7 @@ def run_lightgbm_training():
     # ---------------------------------------------------------
     # 4. GEÇMİŞ PATTERN'LARI HESAPLA (LAG Features - Data Leakage Önleme)
     # ---------------------------------------------------------
-    print("4. Gecmis Pattern'lar Hesaplaniyor (Lag Features)...")
+    logger.info("4. Gecmis Pattern'lar Hesaplaniyor (Lag Features)...")
     
     # Sıralama (Zaman Serisine Göre)
     df_train = df_train.sort_values(['item_id', 'year', 'month']).reset_index(drop=True)
@@ -200,7 +203,7 @@ def run_lightgbm_training():
     # ---------------------------------------------------------
     # 5. TARGET DEĞİŞKEN HESAPLAMA
     # ---------------------------------------------------------
-    print("5. Target Degisken Hesaplaniyor...")
+    logger.info("5. Target Degisken Hesaplaniyor...")
     
     # TARGET: O ayın GERÇEK ihtiyacı (Actual Consumption)
     
@@ -210,11 +213,11 @@ def run_lightgbm_training():
     df_train_valid = df_train[df_train['TARGET_SAFETY_STOCK'] > 0].copy()
     
     if len(df_train_valid) < 20:
-        print(f"⚠️ Yetersiz egitim verisi ({len(df_train_valid)} satir). Minimum 20 satir gerekli.")
+        logger.warning(f"⚠️ Yetersiz egitim verisi ({len(df_train_valid)} satir). Minimum 20 satir gerekli.")
         run_command("TRUNCATE TABLE ss_ai_temporary")
         return
     
-    print(f"✓ {len(df_train_valid)} satir egitim verisi hazir.")
+    logger.info(f"✓ {len(df_train_valid)} satir egitim verisi hazir.")
 
     # ---------------------------------------------------------
     # 6. KATEGORİK DEĞİŞKEN DÖNÜŞÜMLERİ
@@ -259,12 +262,12 @@ def run_lightgbm_training():
     
     valid_features = [f for f in features if f in df_train_valid.columns]
     
-    print(f"✓ {len(valid_features)} feature kullanılıyor.")
+    logger.info(f"✓ {len(valid_features)} feature kullanılıyor.")
 
     # ---------------------------------------------------------
     # 8. MODEL EĞİTİMİ (Quantile Regression) - DÜZELTİLDİ
     # ---------------------------------------------------------
-    print("6. LightGBM Modeli Egitiliyor...")
+    logger.info("6. LightGBM Modeli Egitiliyor...")
     
     model = lgb.LGBMRegressor(
         objective='quantile',
@@ -288,7 +291,7 @@ def run_lightgbm_training():
         categorical_feature=cat_feats
     )
     
-    print("✓ Model egitimi tamamlandi.")
+    logger.info("✓ Model egitimi tamamlandi.")
     
     # ✅ Feature Importance Analizi
     feature_importance = pd.DataFrame({
@@ -296,13 +299,13 @@ def run_lightgbm_training():
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     
-    print("\n📊 En Onemli 10 Feature:")
-    print(feature_importance.head(10).to_string(index=False))
+    logger.info("\n📊 En Onemli 10 Feature:")
+    logger.info(feature_importance.head(10).to_string(index=False))
 
     # ---------------------------------------------------------
     # 9. GELECEK DÖNEM TAHMİNLERİ - DÜZELTİLDİ
     # ---------------------------------------------------------
-    print("\n7. Gelecek Donem Tahminleri Yapiliyor...")
+    logger.info("7. Gelecek Donem Tahminleri Yapiliyor...")
     
     df_future = df_prophet.copy()
     df_future = df_future.merge(df_master, on='item_id', how='left')
@@ -351,15 +354,15 @@ def run_lightgbm_training():
     preds = model.predict(df_future[valid_features])
     df_future['ai_safety_stock'] = np.maximum(preds, 0)  # Negatif değerleri temizle
     
-    print(f"✓ {len(df_future)} adet tahmin yapildi.")
+    logger.info(f"✓ {len(df_future)} adet tahmin yapildi.")
 
     # ---------------------------------------------------------
     # 10. SONUÇLARI KAYDET
     # ---------------------------------------------------------
-    print("\n8. Sonuclar Veritabanina Kaydediliyor...")
+    logger.info("8. Sonuclar Veritabanina Kaydediliyor...")
     
     # A. History Yedekleme (Transaction benzeri güvenlik)
-    print("Mevcut geçici veriler history tablosuna yedekleniyor...")
+    logger.info("Mevcut geçici veriler history tablosuna yedekleniyor...")
     run_command("""
     INSERT INTO ss_ai_history (item_id, date, amount)
     SELECT item_id, date, amount FROM ss_ai_temporary
@@ -367,7 +370,7 @@ def run_lightgbm_training():
     """)
     
     # B. Temizlik
-    print("Geçici tablo temizleniyor...")
+    logger.info("Geçici tablo temizleniyor...")
     run_command("TRUNCATE TABLE ss_ai_temporary")
     
     insert_query = """
@@ -383,9 +386,9 @@ def run_lightgbm_training():
     
     # Batch insert for performance
     if run_command_batch(insert_query, batch_data):
-        print(f"✅ TAMAMLANDI! {len(batch_data)} adet AI Safety Stock tahmini olusturuldu.")
+        logger.info(f"✅ TAMAMLANDI! {len(batch_data)} adet AI Safety Stock tahmini olusturuldu.")
     else:
-        print("❌ KAYIT HATASI! Veriler veritabanına yazılamadı.")
+        logger.error("❌ KAYIT HATASI! Veriler veritabanına yazılamadı.")
 
 if __name__ == "__main__":
     run_lightgbm_training()

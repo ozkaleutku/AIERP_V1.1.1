@@ -7,6 +7,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.config import DB_CONFIG
+from backend.logger import get_logger
+
+logger = get_logger(__name__)
 
 def create_tables():
     """
@@ -645,11 +648,11 @@ def create_tables():
         cur_default.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{DB_CONFIG['dbname']}'")
         exists = cur_default.fetchone()
         if not exists:
-            print(f"Veritabani '{DB_CONFIG['dbname']}' bulunamadi, olusturuluyor...")
+            logger.warning(f"Veritabani '{DB_CONFIG['dbname']}' bulunamadi, olusturuluyor...")
             cur_default.execute(f"CREATE DATABASE \"{DB_CONFIG['dbname']}\"")
-            print("Veritabani olusturuldu.")
+            logger.info("Veritabani olusturuldu.")
         else:
-             print(f"Veritabani '{DB_CONFIG['dbname']}' zaten mevcut.")
+             logger.info(f"Veritabani '{DB_CONFIG['dbname']}' zaten mevcut.")
              
         cur_default.close()
         conn_default.close()
@@ -659,13 +662,13 @@ def create_tables():
         cur = conn.cursor()
 
         # Komutları sırayla çalıştır
-        print("Tablolar olusturuluyor...")
+        logger.info("Tablolar olusturuluyor...")
         for command in commands:
             # Tablo adını logla (basit bir parse işlemi ile)
             if "CREATE TABLE" in command:
                  try:
                     table_name = command.split("EXISTS")[1].split("(")[0].strip()
-                    print(f"- {table_name}")
+                    logger.info(f"- {table_name}")
                  except:
                     pass
             cur.execute(command)
@@ -673,13 +676,14 @@ def create_tables():
         # Değişiklikleri kaydet
         conn.commit()
 
-        print("\nTum tablolar basariyla olusturuldu!")
+
+        logger.info("Tum tablolar basariyla olusturuldu!")
 
         cur.close()
         conn.close()
 
     except (Exception, psycopg2.DatabaseError) as error:
-        print(f"Hata olustu: {error}")
+        logger.error(f"Hata olustu: {error}")
 
 if __name__ == '__main__':
     create_tables()

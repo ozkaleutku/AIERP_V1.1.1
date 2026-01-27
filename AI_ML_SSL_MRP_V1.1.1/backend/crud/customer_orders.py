@@ -7,6 +7,9 @@ from backend.simulation.sim_bom_explosion import process_demand, set_current_ord
 from backend.config import DB_CONFIG
 
 from backend.database.db_helper import get_db_connection, release_db_connection
+from backend.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Pydantic Models
 class CustomerOrderCreate(BaseModel):
@@ -63,7 +66,7 @@ def create_customer_order(order: CustomerOrderCreate):
                      new_order['delivery_date'] or date.today()
                  )
             except Exception as e:
-                print(f"Error recording shipment movement: {e}")
+                logger.error(f"Error recording shipment movement: {e}")
         else:
              # Regular Active Order -> Simulation
              try:
@@ -84,7 +87,7 @@ def create_customer_order(order: CustomerOrderCreate):
                  if missing:
                      warnings = [{"item_id": item_id, "type": "missing_supplier"} for item_id in missing]
              except Exception as sim_error:
-                 print(f"Simulation Update Warning: {sim_error}")
+                 logger.warning(f"Simulation Update Warning: {sim_error}")
                  # We do NOT rollback the main order for simulation error, just log warning.
              finally:
                  # Always clear order context
@@ -182,7 +185,7 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
                 prod_time = updated_order.get('production_time_days') or 0
                 process_demand(updated_order['item_id'], float(updated_order['amount']), due_date, int(prod_time) if prod_time else 0)
             except Exception as sim_error:
-                print(f"Simulation Update Warning during Update: {sim_error}")
+                logger.warning(f"Simulation Update Warning during Update: {sim_error}")
             finally:
                 clear_current_order_id()
                 
@@ -206,13 +209,13 @@ def delete_customer_order(order_id: int):
     try:
         # 1. First reverse the simulation effects (before deleting order due to FK cascade)
         reversed_count = reverse_order_effects(order_id)
-        print(f"Reversed {reversed_count} simulation effects for order {order_id}")
+        logger.info(f"Reversed {reversed_count} simulation effects for order {order_id}")
         
         # 2. Delete the order (sim_order_effects will also be deleted via CASCADE)
         cur.execute("DELETE FROM customer_orders WHERE id = %s", (order_id,))
         conn.commit()
         
-        print(f"Order {order_id} deleted successfully.")
+        logger.info(f"Order {order_id} deleted successfully.")
         
     except Exception as e:
         conn.rollback()
