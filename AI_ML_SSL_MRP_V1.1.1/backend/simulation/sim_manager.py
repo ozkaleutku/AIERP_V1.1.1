@@ -137,7 +137,7 @@ def get_simulation_suggestions():
             # Skip if order_date is in the past (don't show past suggestions)
             if order_date < date.today():
                 continue
-
+            suggestions.append({
                 "item_id": item_id,
                 "amount": missing_amount,
                 "purpose": "Üretim İçin",
