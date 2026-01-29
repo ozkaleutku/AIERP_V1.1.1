@@ -93,7 +93,6 @@ sequenceDiagram
     DB-->>SIM: sip_harita yenilendi
     SIM->>SIM: Tüm siparişleri tekrar hesapla
 ```
-```
 
 ---
 
@@ -114,23 +113,42 @@ Level 0: Mamül (Örn: Bilgisayar)
 
 ```mermaid
 flowchart TD
-    A["Sipariş: 10 Bilgisayar"] --> B{"BOM Var mı?"}
-    B -->|Evet| C["Alt Bileşenleri Getir"]
-    C --> D["10 x Anakart Gerekli"]
-    C --> E["10 x Kasa Gerekli"]
-    C --> F["10 x Ekran Gerekli"]
-    
-    D --> G{"Anakart BOM Var mı?"}
-    G -->|Evet| H["10 x PCB"]
-    G -->|Evet| I["10 x RAM"]
-    G -->|Evet| J["10 x CPU"]
-    
-    H --> K{"PCB BOM Var mı?"}
-    K -->|Evet| L["50 gram Bakır"]
-    K -->|Evet| M["20 gram Lehim"]
-    
-    B -->|Hayır| N["Hammadde: Direkt Tüketim"]
-    K -->|Hayır| N
+    A["Sipariş: 10 Bilgisayar"]
+    B{"BOM Var mı?"}
+    C["Alt Bileşenleri Gettir"]
+    N1["Hammadde: Direkt Tüketim"]
+
+    D["10 x Anakart Gerekli"]
+    E["10 x Kasa Gerekli"]
+    F["10 x Ekran Gerekli"]
+
+    G{"Anakart BOM Var mı?"}
+    H["10 x PCB"]
+    I["10 x RAM"]
+    J["10 x CPU"]
+
+    K{"PCB BOM Var mı?"}
+    L["50 gram Bakır"]
+    M["20 gram Lehim"]
+
+    A --> B
+    B -- Evet --> C
+    B -- Hayır --> N1
+
+    C --> D
+    C --> E
+    C --> F
+
+    D --> G
+    G -- Evet --> H
+    G -- Evet --> I
+    G -- Evet --> J
+
+    H --> K
+    K -- Evet --> L
+    K -- Evet --> M
+    K -- Hayır --> N1
+
 ```
 
 ### 4.3 Matematiksel Model (Recursive Explosion)
