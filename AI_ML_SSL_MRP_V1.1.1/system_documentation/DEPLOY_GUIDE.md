@@ -83,6 +83,41 @@ Geliştirme süreci için ana dizindeki `start_project.bat` dosyasına çift tı
 
 ---
 
+## 6. Port Değiştirme (Port Configuration)
+Varsayılan portlar (Backend: 8000, Frontend: 5173) çakışıyorsa veya değiştirmek istiyorsanız aşağıdaki dosyaları düzenleyin:
+
+### A. Backend Portunu Değiştirme (API Sunucusu)
+1.  `backend/main.py` dosyasını açın.
+2.  Dosyanın en altındaki `uvicorn.run` satırını bulun:
+    ```python
+    if __name__ == "__main__":
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    ```
+3.  `port=8000` değerini istediğiniz yeni port numarasıyla değiştirin (Örn: `port=9090`).
+
+### B. Frontend Portunu Değiştirme (Web Arayüzü)
+1.  `frontend/package.json` dosyasını açın.
+2.  `scripts` altındaki `dev` komutunu bulun:
+    ```json
+    "dev": "vite --host",
+    ```
+3.  Sonuna `--port` parametresi ekleyin:
+    ```json
+    "dev": "vite --host --port 3000",
+    ```
+
+### C. Bağlantıyı Güncelleme (Kritik Adım!)
+Eğer **Backend** portunu değiştirdiyseniz, Frontend'in yeni adresi bilmesi gerekir. Bunu yapmazsanız "Network Error" alırsınız.
+1.  `frontend/src/api.js` dosyasını açın.
+2.  `baseURL` satırındaki `8000` değerini yeni backend portunuzla değiştirin:
+    ```javascript
+    // Örnek: Backend portunu 9090 yaptıysanız:
+    baseURL: `http://${window.location.hostname}:9090/api`,
+    ```
+
+---
+
 ## 🛠️ Sorun Giderme
 *   **Port Hatası:** Eğer 8000 veya 5173 portları doluysa, scriptler hata verebilir. İlgili portları kullanan diğer uygulamaları kapatın.
 *   **Veritabanı Bağlantı Hatası:** `backend/config.py` içindeki şifre ve kullanıcı adının PostgreSQL kurulumunuzla eşleştiğinden emin olun.

@@ -113,24 +113,24 @@ Level 0: Mamül (Örn: Bilgisayar)
 ### 4.2 Patlatma Algoritması
 
 ```mermaid
-graph TD
-    A[Sipariş: 10 Bilgisayar] --> B{BOM Var mı?}
-    B -- Evet --> C[Alt Bileşenleri Getir]
-    C --> D[10 x Anakart Gerekli]
-    C --> E[10 x Kasa Gerekli]
-    C --> F[10 x Ekran Gerekli]
+flowchart TD
+    A["Sipariş: 10 Bilgisayar"] --> B{"BOM Var mı?"}
+    B -->|Evet| C["Alt Bileşenleri Getir"]
+    C --> D["10 x Anakart Gerekli"]
+    C --> E["10 x Kasa Gerekli"]
+    C --> F["10 x Ekran Gerekli"]
     
-    D --> G{Anakart BOM Var mı?}
-    G -- Evet --> H[10 x PCB]
-    G -- Evet --> I[10 x RAM]
-    G -- Evet --> J[10 x CPU]
+    D --> G{"Anakart BOM Var mı?"}
+    G -->|Evet| H["10 x PCB"]
+    G -->|Evet| I["10 x RAM"]
+    G -->|Evet| J["10 x CPU"]
     
-    H --> K{PCB BOM Var mı?}
-    K -- Evet --> L[50 gram Bakır]
-    K -- Evet --> M[20 gram Lehim]
+    H --> K{"PCB BOM Var mı?"}
+    K -->|Evet| L["50 gram Bakır"]
+    K -->|Evet| M["20 gram Lehim"]
     
-    B -- Hayır --> N[Hammadde: Direkt Tüketim]
-    K -- Hayır --> N
+    B -->|Hayır| N["Hammadde: Direkt Tüketim"]
+    K -->|Hayır| N
 ```
 
 ### 4.3 Matematiksel Model (Recursive Explosion)

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Schema Graph</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f8fafc;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        button:hover {
+            background-color: #1d4ed8;
+        }
+        button.secondary {
+            background-color: #64748b;
+        }
+        button.secondary:hover {
+            background-color: #475569;
+        }
+        #graph-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        /* Mermaid styling override */
+        .mermaid {
+            background-color: transparent !important;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script src="js/data.js"></script>
+</head>
+<body>
+    <div id="controls">
+        <button class="secondary" onclick="window.location.href='index.html'">← Back to Docs</button>
+        <button onclick="resetZoom()">Reset View</button>
+        <button onclick="panZoomInstance.zoomIn()">Zoom In (+)</button>
+        <button onclick="panZoomInstance.zoomOut()">Zoom Out (-)</button>
+    </div>
+    
+    <div id="graph-container">
+        <div class="mermaid" id="diagram">
+            <!-- Diagram will be loaded here -->
+        </div>
+    </div>
+
+    <script>
+        let panZoomInstance;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Initialize Mermaid
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: 'default',
+                securityLevel: 'loose',
+                er: {
+                    useMaxWidth: false
+                }
+            });
+
+            // Get the schema content
+            const schemaContent = docData.root.DATABASE_SCHEMA;
+            // Extract the mermaid block
+            const match = schemaContent.match(/```mermaid([\s\S]*?)```/);
+            
+            if (match && match[1]) {
+                const element = document.getElementById('diagram');
+                let graphDefinition = match[1].trim();
+                
+                // Strip out any hardcoded theme initialization
+                graphDefinition = graphDefinition.replace(/%%\{init:.*\}%%/g, '');
+
+                try {
+                    const { svg } = await mermaid.render('graphDiv', graphDefinition);
+                    element.innerHTML = svg;
+                    const svgElement = element.querySelector('svg');
+                    
+                    // Add some padding to SVG
+                    svgElement.style.padding = '20px';
+                    
+                    panZoomInstance = svgPanZoom(svgElement, {
+                        zoomEnabled: true,
+                        controlIconsEnabled: false,
+                        fit: true,
+                        center: true,
+                        minZoom: 0.1,
+                        maxZoom: 10
+                    });
+                } catch (e) {
+                    element.innerHTML = `<div style="color:red; padding:20px;">Error rendering graph: ${e.message}</div>`;
+                    console.error(e);
+                }
+            } else {
+                document.getElementById('diagram').innerText = 'No diagram found in DATABASE_SCHEMA.md';
+            }
+        });
+
+        function resetZoom() {
+            if (panZoomInstance) {
+                panZoomInstance.reset();
+            }
+        }
+    </script>
+</body>
+</html>
