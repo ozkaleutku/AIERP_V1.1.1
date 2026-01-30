@@ -23,3 +23,16 @@
     2.  Yeni miktarı yazın.
     3.  `Güncelle` diyerek kaydedin.
     *   *Uyarı: Buradan yapılan değişiklikler "Düzeltme" olarak loglanır.*
+
+4.  **Aktif Üretim Emirleri Paneli (Sidebar)**
+    *   Ekranın sağ tarafında yer alır. Sadece **"Bekleniyor"** ve **"Üretimde"** durumundaki siparişleri gösterir.
+    *   Depocunun hangi sipariş için malzeme hazırlayacağını takip etmesini sağlar.
+    *   Panel kapatılıp açılabilir.
+
+5.  **Üretime Çıkış İşlemi (Sipariş Bazlı)**
+    *   Bir sipariş için hammadde verirken:
+    1.  **"Stok Hareketi Ekle"** butonuna basın.
+    2.  Amaç bölümünden **"Üretime Çıkış"** seçeneğini işaretleyin.
+    3.  Yeni açılan **"Hangi Sipariş İçin?"** kutusundan listedeki siparişi seçin.
+    4.  Miktarı girin ve kaydedin.
+    *   *Önemli: Bu seçim, simülasyonun "bu malzeme zaten verildi" diyerek mükerrer talep açmasını engeller.*

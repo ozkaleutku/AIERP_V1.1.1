@@ -26,12 +26,25 @@ def initialize_simulation_table(from_active_inventory=True):
         INSERT INTO sip_harita_active_inventory (item_id, current_stock)
         SELECT item_id, current_stock FROM active_inventory
         """)
+
+        # 2.5. Add Incoming Purchase Orders (On the way)
+        # We consider items that are ordered but not yet received (actual_coming_date IS NULL)
+        # as "future available stock" for the purpose of simulation.
+        run_command("""
+        INSERT INTO sip_harita_active_inventory (item_id, current_stock)
+        SELECT item_id, SUM(amount)
+        FROM purchase
+        WHERE actual_coming_date IS NULL
+        GROUP BY item_id
+        ON CONFLICT (item_id) 
+        DO UPDATE SET current_stock = sip_harita_active_inventory.current_stock + EXCLUDED.current_stock;
+        """)
     
     # 3. Replay all active customer orders through BOM explosion
     df_orders = run_query("""
         SELECT id, item_id, amount, expected_delivery_date, order_date, production_time_days
         FROM customer_orders 
-        WHERE status IN ('Bekleniyor', 'Üretimde', 'Hazır')
+        WHERE status IN ('Bekleniyor', 'Üretimde')
         ORDER BY expected_delivery_date ASC
     """)
     

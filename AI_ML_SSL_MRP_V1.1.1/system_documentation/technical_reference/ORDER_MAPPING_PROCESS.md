@@ -19,6 +19,7 @@ graph TB
         CO[Müşteri Siparişi]
         SS[Emniyet Stoğu AI/Kings]
         INV[Gerçek Stok]
+        CONS[Tüketim Kayıtları]
     end
 
     subgraph SIMULATION[Simülasyon Motoru]
@@ -36,6 +37,7 @@ graph TB
     CO --> SIM
     SS --> CALC
     INV -. Sadece Reset .-> SIM
+    CONS --> BOM
     SIM --> BOM
     BOM --> CALC
     CALC --> SHORT
@@ -92,6 +94,10 @@ sequenceDiagram
     SIM->>DB: active_inventory KOPYALA
     DB-->>SIM: sip_harita yenilendi
     SIM->>SIM: Tüm siparişleri tekrar hesapla
+    Note right of SIM: Her sipariş için:
+    SIM->>DB: Tüketim Kontrolü (READ)
+    SIM->>SIM: Net İhtiyaç = Sipariş - Tüketilen
+    SIM->>DB: sip_harita UPDATE (Kalan kadar)
 ```
 
 ---
@@ -114,9 +120,11 @@ Level 0: Mamül (Örn: Bilgisayar)
 ```mermaid
 flowchart TD
     A["Sipariş: 10 Bilgisayar"]
+    CHK{"Daha Önce Verildi mi?"}
     B{"BOM Var mı?"}
-    C["Alt Bileşenleri Gettir"]
+    C["Alt Bileşenleri Getir"]
     N1["Hammadde: Direkt Tüketim"]
+    STOP["İşlem Yok (Zaten Hatta)"]
 
     D["10 x Anakart Gerekli"]
     E["10 x Kasa Gerekli"]
@@ -131,7 +139,9 @@ flowchart TD
     L["50 gram Bakır"]
     M["20 gram Lehim"]
 
-    A --> B
+    A --> CHK
+    CHK -- Evet --> STOP
+    CHK -- Hayır --> B
     B -- Evet --> C
     B -- Hayır --> N1
 
@@ -150,6 +160,16 @@ flowchart TD
     K -- Hayır --> N1
 
 ```
+
+
+### 4.2.1 Kısmi Tüketim Kontrolü (Partial Consumption Check)
+
+Patlatma işlemi başlamadan önce, algoritma **`ORDER_MATERIAL_CONSUMPTION`** tablosunu kontrol eder.
+*   **Amaç:** Depodan üretime zaten verilmiş malzemelerin tekrar istenmesini (çift sayım) engellemek.
+*   **Mantık:**
+    1.  O sipariş için o malzemeden daha önce çıkış yapılmış mı?
+    2.  `Net İhtiyaç = Teorik İhtiyaç - Daha Önce Verilen`
+    3.  Eğer `Net İhtiyaç <= 0` ise, o dalı hesaplamayı durdur (BOM'u patlatma).
 
 ### 4.3 Matematiksel Model (Recursive Explosion)
 

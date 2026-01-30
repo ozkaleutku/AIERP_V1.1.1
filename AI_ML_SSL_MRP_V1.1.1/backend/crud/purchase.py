@@ -1,6 +1,7 @@
 
 import sys
 import os
+import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -34,8 +35,26 @@ def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_
 def delete_order(order_id):
     """
     Siparişi siler. 
-    Not: Tetikleyiciler stok hareketlerini vs düzeltir.
+    Eğer sipariş henüz teslim alınmadıysa (Yolda ise),
+    Simülasyon stoğuna daha önce eklenmiş olan bu miktarı geri düşeriz.
     """
+    # 1. Siparişi bul
+    orders = run_query("SELECT item_id, amount, actual_coming_date FROM purchase WHERE id = %s", (order_id,))
+    
+    if not orders.empty:
+        order = orders.iloc[0]
+        # Eğer henüz gelmemişse (YOLDAYSAN), simülasyon stoğundan düşmeliyiz
+        if pd.isna(order['actual_coming_date']) or order['actual_coming_date'] is None:
+            # Simülasyon stoğundan düş (Negatif update)
+            # NOT: Bu sadece o anlık simülasyon tablosunu düzeltir.
+            # Reset atılınca zaten VT'den okuyacağı için sorun kalmaz.
+            run_command("""
+            UPDATE sip_harita_active_inventory 
+            SET current_stock = current_stock - %s 
+            WHERE item_id = %s
+            """, (float(order['amount']), str(order['item_id'])))
+            
+    # 2. Sil
     sql = "DELETE FROM purchase WHERE id = %s"
     return run_command(sql, (order_id,))
 

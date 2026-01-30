@@ -40,6 +40,7 @@ class StockMovementCreate(BaseModel):
     amount: float = Field(..., gt=0, description="Miktar 0'dan büyük olmalı")
     purpose: str
     date: Optional[str] = None
+    order_id: Optional[int] = None
 
 class SupplierItemCreate(BaseModel):
     item_id: str
@@ -322,7 +323,8 @@ def create_stock_movement(body: StockMovementCreate):
             item_id=body.item_id,
             amount=body.amount,
             purpose=body.purpose,
-            date=body.date
+            date=body.date,
+            order_id=body.order_id
         )
         return {"status": "success"}
     except Exception as e:

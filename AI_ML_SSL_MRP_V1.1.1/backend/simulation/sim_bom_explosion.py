@@ -7,22 +7,36 @@ logger = get_logger(__name__)
 # Thread-local storage for tracking current order context
 _current_order_id = None
 _missing_suppliers = set()  # Track items without suppliers during process_demand
+_current_order_consumption = {} # Cache for partial consumption
 
 def set_current_order_id(order_id):
     """
     Sets the current order ID for effect tracking.
     Must be called before process_demand.
+    Pre-fetches consumption data to avoid repeated DB queries.
     """
-    global _current_order_id, _missing_suppliers
+    global _current_order_id, _missing_suppliers, _current_order_consumption
     _current_order_id = order_id
     _missing_suppliers = set()  # Reset for new order
+    _current_order_consumption = {}
+
+    # Pre-fetch all consumption for this order
+    try:
+        sql = "SELECT item_id, amount FROM order_material_consumption WHERE order_id = %s"
+        df = run_query(sql, (order_id,))
+        if not df.empty:
+            for _, row in df.iterrows():
+                _current_order_consumption[str(row['item_id'])] = float(row['amount'])
+    except Exception as e:
+        logger.error(f"Error serving consumption cache for order {order_id}: {e}")
 
 def clear_current_order_id():
     """
-    Clears the current order ID after processing is complete.
+    Clears the current order ID and consumption cache after processing is complete.
     """
-    global _current_order_id
+    global _current_order_id, _current_order_consumption
     _current_order_id = None
+    _current_order_consumption = {}
 
 def get_missing_suppliers():
     """
@@ -156,12 +170,31 @@ def process_demand(item_id, qty, due_date, production_time_days=0, visited=None)
     # Add current item to visited path
     visited.add(item_id)
     
-    # Convert due_date to date object if string
-    if isinstance(due_date, str):
-        due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
     else:
         due_date_obj = due_date
     
+    # --- PARTIAL CONSUMPTION LOGIC START (OPTIMIZED) ---
+    # Check if we have already consumed materials for this specific order & item using CACHE.
+    global _current_order_id, _current_order_consumption
+    
+    if _current_order_id is not None:
+        # Check cache instead of DB
+        consumed_amount = _current_order_consumption.get(str(item_id), 0.0)
+        
+        if consumed_amount > 0:
+            # Effective needed is Original Need - Already Consumed
+            effective_qty = qty - consumed_amount
+            
+            if effective_qty <= 0:
+                # We have already consumed enough of this item for this order.
+                # No need to deduct from Sim Inventory or Explode BOM further.
+                logger.info(f"Order {_current_order_id}: Item {item_id} fully pre-consumed. Skipping.")
+                return
+            else:
+                # We still need some more.
+                qty = effective_qty
+    # --- PARTIAL CONSUMPTION LOGIC END ---
+
     current_stock = check_sim_stock(item_id)
     
     # 1. Consume what we have - pass due_date for tracking

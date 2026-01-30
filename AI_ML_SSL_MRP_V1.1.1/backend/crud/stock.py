@@ -7,7 +7,7 @@ from backend.database.db_helper import run_query, run_command
 import pandas as pd
 from datetime import datetime
 
-def add_stock_movement(item_id, amount, purpose, date=None):
+def add_stock_movement(item_id, amount, purpose, date=None, order_id=None):
     """
     Yeni bir stok hareketi ekler.
     
@@ -16,6 +16,7 @@ def add_stock_movement(item_id, amount, purpose, date=None):
         amount (float): Miktar
         purpose (str): 'giriş', 'üretime_giden', 'satış_çıkışı'
         date (str/date): Tarih (Opsiyonel, boşsa bugün)
+        order_id (int): Opsiyonel, eğer üretim için çıkış yapılıyorsa sipariş ID
     """
     if date is None:
         date = datetime.now().date()
@@ -25,7 +26,19 @@ def add_stock_movement(item_id, amount, purpose, date=None):
     VALUES (%s, %s, %s, %s)
     """
     params = (item_id, amount, purpose, date)
-    return run_command(query, params)
+    run_command(query, params)
+    
+    # Eğer Sipariş ID belirtilmişse ve üretim çıkışıysa, Tüketim tablosunu güncelle
+    if order_id is not None and ('üretim' in purpose.lower() or 'production' in purpose.lower()):
+        consumption_sql = """
+        INSERT INTO order_material_consumption (order_id, item_id, amount, date)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (order_id, item_id) 
+        DO UPDATE SET amount = order_material_consumption.amount + EXCLUDED.amount
+        """
+        run_command(consumption_sql, (order_id, item_id, amount, date))
+    
+    return True
 
 
 def search_stock_movements(item_id=None, purpose=None, start_date=None, end_date=None, limit=100):

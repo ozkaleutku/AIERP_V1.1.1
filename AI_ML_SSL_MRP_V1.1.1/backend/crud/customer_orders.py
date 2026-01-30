@@ -164,6 +164,10 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
         # 4. Handle Logic based on NEW status
         new_status = updated_order['status']
         
+        if new_status in ('Sevk Edildi', 'Hazır'):
+            # CLEANUP: Remove consumption records for this order since it's finished/shipped
+            cur.execute("DELETE FROM order_material_consumption WHERE order_id = %s", (order_id,))
+
         if new_status == 'Sevk Edildi':
             # Order Shipped -> Reduced Physical Stock
             # If it wasn't shipped before, deduct stock
@@ -175,9 +179,8 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
                     'satış_çıkışı', 
                     updated_order['delivery_date'] or date.today()
                 )
-                # No need to re-simulate, effects already reversed above.
                 
-        elif new_status in ('Bekleniyor', 'Üretimde', 'Hazır'):
+        elif new_status in ('Bekleniyor', 'Üretimde'):
             # Order is still active -> Re-Simulate with new values
             try:
                 set_current_order_id(updated_order['id'])

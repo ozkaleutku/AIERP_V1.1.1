@@ -156,3 +156,14 @@ CREATE TABLE IF NOT EXISTS sip_harita_active_inventory (
     item_id character varying(20.0) NOT NULL DEFAULT nan,
     current_stock numeric(nan) DEFAULT 0
 );
+
+-- Table: order_material_consumption
+CREATE TABLE IF NOT EXISTS order_material_consumption (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES customer_orders(id) ON DELETE CASCADE,
+    item_id VARCHAR(20) REFERENCES item(item_id) ON DELETE CASCADE,
+    amount NUMERIC DEFAULT 0,
+    date DATE DEFAULT CURRENT_DATE,
+    UNIQUE(order_id, item_id)
+);
+

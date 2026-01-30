@@ -193,6 +193,13 @@ erDiagram
         date due_date
         timestamp created_at
     }
+
+    ORDER_MATERIAL_CONSUMPTION {
+        serial id PK
+        int order_id FK
+        varchar item_id FK
+        decimal amount
+    }
 ```
 
 ---
@@ -210,9 +217,10 @@ erDiagram
 
 - **`PURCHASE`**: Tedarikçilere verilen siparişlerdir. `delay_day` sütunu, `actual_coming_date` girildiği an otomatik hesaplanır.
 - **`STOCK_MOVEMENT`**: Depodaki tüm giriş/çıkış hareketleridir.
-- **`CUSTOMER_ORDERS`**: Müşterilerden alınan satış siparişleridir.
+- **`CUSTOMER_ORDERS`**: Müşterilerden alınan satış siparişleridir. "Sevk Edildi" veya "Hazır" olduğunda ilgili tüketim kayıtları otomatik temizlenir.
 - **`START_INVENTORIES`**: Her ay başında sistemin otomatik aldığı stok fotoğraflarıdır (Snapshot).
 - **`SALES_OUT_HISTORY`**: Satış amacıyla çıkış yapılan stok hareketlerinin kopyasıdır, talep tahminlemede kullanılır.
+- **`ORDER_MATERIAL_CONSUMPTION`**: Bir sipariş için üretime verilen malzemeleri takip eder. Simülasyonun mükerrer hesap yapmasını engeller.
 
 ### 3. Analitik ve Yapay Zeka Tabloları
 
