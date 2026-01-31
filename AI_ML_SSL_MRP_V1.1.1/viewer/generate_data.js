@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Assuming script is in /viewer/generate_data.js
+// Path: viewer -> root -> system_documentation
 const rootDir = path.resolve(__dirname, '../system_documentation');
 const outputFile = path.resolve(__dirname, 'js/data.js');
 
@@ -55,10 +56,10 @@ function readFiles() {
 
         const dir = path.dirname(outputFile);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        
+
         fs.writeFileSync(outputFile, `const docData = ${JSON.stringify(data, null, 4)};`);
         console.log('File written successfully. Size:', fs.statSync(outputFile).size);
-        
+
     } catch (error) {
         console.error('Error:', error);
     }

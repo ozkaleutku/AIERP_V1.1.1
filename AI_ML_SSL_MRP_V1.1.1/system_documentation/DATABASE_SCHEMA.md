@@ -199,6 +199,7 @@ erDiagram
         int order_id FK
         varchar item_id FK
         decimal amount
+        date date
     }
 ```
 

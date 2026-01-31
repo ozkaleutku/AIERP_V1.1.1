@@ -167,3 +167,14 @@ CREATE TABLE IF NOT EXISTS order_material_consumption (
     UNIQUE(order_id, item_id)
 );
 
+-- Table: sim_order_effects
+CREATE TABLE IF NOT EXISTS sim_order_effects (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES customer_orders(id) ON DELETE CASCADE,
+    item_id VARCHAR(20) REFERENCES item(item_id) ON DELETE CASCADE,
+    amount_changed NUMERIC DEFAULT 0,
+    due_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
