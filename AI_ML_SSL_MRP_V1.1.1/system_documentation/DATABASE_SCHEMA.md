@@ -221,13 +221,15 @@ erDiagram
 - **`CUSTOMER_ORDERS`**: Müşterilerden alınan satış siparişleridir. "Sevk Edildi" veya "Hazır" olduğunda ilgili tüketim kayıtları otomatik temizlenir.
 - **`START_INVENTORIES`**: Her ay başında sistemin otomatik aldığı stok fotoğraflarıdır (Snapshot).
 - **`SALES_OUT_HISTORY`**: Satış amacıyla çıkış yapılan stok hareketlerinin kopyasıdır, talep tahminlemede kullanılır.
-- **`ORDER_MATERIAL_CONSUMPTION`**: Bir sipariş için üretime verilen malzemeleri takip eder. Simülasyonun mükerrer hesap yapmasını engeller.
+
 
 ### 3. Analitik ve Yapay Zeka Tabloları
 
 - **`SS_KINGS_FORMULA`**: Klasik istatistiksel yöntemle (King's Formula) hesaplanan güvenlik stoğu önerileridir. `result_king` sütunu veritabanı tarafından otomatik hesaplanır.
-- **`PROPHET...`**: Facebook Prophet algoritmasının zaman serisi tahminleridir (History: Kesinleşmiş, Temporary: Hesaplanan/Taslak).
-- **`SS_AI...`**: LightGBM algoritmasının ürettiği yapay zeka tabanlı güvenlik stoğu tahminleridir.
+- **`PROPHET_TABLE_HISTORY`**: Facebook Prophet algoritmasının kesinleşmiş geçmiş zaman serisi tahmin verileridir.
+- **`PROPHET_TABLE_TEMPORARY`**: Hesaplama sırasında üretilen geçici Prophet tahminleridir (Taslak).
+- **`SS_AI_HISTORY`**: LightGBM algoritmasının ürettiği geçmişe dönük yapay zeka güvenlik stoğu tahminleridir.
+- **`SS_AI_TEMPORARY`**: LightGBM algoritmasının hesaplama anında ürettiği geçici güvenlik stoğu verileridir.
 - **`CALCULATED_FULL_SS_AI_TEMP`**: BOM patlatma işlemi sırasında, her seviyedeki (`Level 0` - `Level N`) ihtiyacı hesaplamak için kullanılan geçici çalışma tablosudur.
 - **`FINAL_SAFETY_STOCK`**: Tüm algoritmalar çalıştıktan sonra yöneticinin önüne gelen nihai güvenlik stoğu rapor tablosudur.
 
@@ -235,6 +237,7 @@ erDiagram
 
 - **`SIP_HARITA_ACTIVE_INVENTORY`**: Müşteri siparişlerinin "Ne olurdu?" senaryolarını denemek için kullanılan sanal stok tablosudur. Gerçek stoku bozmadan simülasyon yapmayı sağlar.
 - **`SIM_ORDER_EFFECTS`**: Her bir müşteri siparişinin simülasyon stoğu üzerindeki etkisini (rezerve ettiği miktar vb.) takip eder.
+- **`ORDER_MATERIAL_CONSUMPTION`**: Bir sipariş için üretime verilen malzemeleri takip eder. Simülasyonun mükerrer hesap yapmasını engeller.
 
 ---
 

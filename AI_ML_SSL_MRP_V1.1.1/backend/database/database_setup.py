@@ -233,6 +233,18 @@ def create_tables():
         )
         """,
 
+        # 11.6.5. Sipariş Malzeme Tüketimi (Order Material Consumption)
+        """
+        CREATE TABLE IF NOT EXISTS order_material_consumption (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER REFERENCES customer_orders(id) ON DELETE CASCADE,
+            item_id VARCHAR(20) REFERENCES item(item_id) ON DELETE CASCADE,
+            amount NUMERIC DEFAULT 0,
+            date DATE DEFAULT CURRENT_DATE,
+            UNIQUE(order_id, item_id)
+        )
+        """,
+
         # 11.7. Sipariş Simülasyon Etkileri Takip Tablosu
         # Her müşteri siparişinin hangi kalemlerde ne kadar stok değişikliği yaptığını kaydeder
         # Sipariş silindiğinde bu etkiler geri alınır
