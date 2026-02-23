@@ -8,13 +8,6 @@ import sys
 import os
 import io
 
-# Fix Windows encoding issues with Turkish characters
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-
-# Add backend root to sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.database.db_helper import run_query, run_command, run_command_batch
 from backend.logger import get_logger
@@ -34,6 +27,10 @@ def run_lightgbm_training():
     
     # A. Prophet Tahminleri
     df_prophet = run_query("SELECT * FROM prophet_table_temporary")
+    if df_prophet.empty:
+        logger.warning("Prophet verisi bulunamadı! Lütfen önce Prophet tahminlerini çalıştırın.")
+        return
+        
     df_prophet['date'] = pd.to_datetime(df_prophet['date'])
     df_prophet['year'] = df_prophet['date'].dt.year
     df_prophet['month'] = df_prophet['date'].dt.month
@@ -62,8 +59,10 @@ def run_lightgbm_training():
     df_inventory.rename(columns={'amount': 'start_stock'}, inplace=True)
 
     # E. Item & Supplier Bilgileri (Risk Parameters)
+    # Use DISTINCT ON to ensure only ONE supplier (the fastest one) is selected per item.
+    # This prevents duplicate rows in the training and prediction data when an item has multiple active suppliers.
     item_query = """
-    SELECT 
+    SELECT DISTINCT ON (i.item_id)
         i.item_id, 
         i.item_type, 
         i.item_quantity_type,
@@ -76,6 +75,7 @@ def run_lightgbm_training():
     FROM item i
     LEFT JOIN ss_kings_formula sk ON i.item_id = sk.item_id
     LEFT JOIN supplier_item s ON i.item_id = s.item_id AND s.supplier_id = sk.supplier_id
+    ORDER BY i.item_id, sk.leadtime_avg ASC NULLS LAST
     """
     df_master = run_query(item_query)
 
@@ -92,7 +92,7 @@ def run_lightgbm_training():
     # A. Tuketim Istatistikleri (Aylik Bazda)
     # 1. Net Tuketimler: 'uretime_giden' ve 'satis_cikisi' her zaman tuketimdir.
         
-    cons_mask = df_movements['purpose'].isin(['uretime_giden', 'satis_cikisi'])
+    cons_mask = df_movements['purpose'].isin(['üretime_giden', 'satış_çıkışı'])
 
     if not df_movements[cons_mask].empty:
         df_cons = df_movements[cons_mask].groupby(['item_id', 'year', 'month'])['amount'].agg(['sum', 'mean', 'std']).reset_index()
@@ -210,7 +210,8 @@ def run_lightgbm_training():
     df_train['TARGET_SAFETY_STOCK'] = df_train['actual_consumption']
     
     # ✅ Eğitim için yeterli veri kontrolü (ERKENDEN!)
-    df_train_valid = df_train[df_train['TARGET_SAFETY_STOCK'] > 0].copy()
+    # Kullanıcı talebi: 0 tüketim olan ayları da öğrenmeli (Bias önleme)
+    df_train_valid = df_train[df_train['TARGET_SAFETY_STOCK'] >= 0].copy()
     
     if len(df_train_valid) < 20:
         logger.warning(f"⚠️ Yetersiz egitim verisi ({len(df_train_valid)} satir). Minimum 20 satir gerekli.")

@@ -1,11 +1,6 @@
 
-import sys
-import os
-import pandas as pd
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 from backend.database.db_helper import run_query, run_command
+from backend.crud.stock import add_stock_movement
 
 def get_orders():
     """
@@ -34,27 +29,9 @@ def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_
 
 def delete_order(order_id):
     """
-    Siparişi siler. 
-    Eğer sipariş henüz teslim alınmadıysa (Yolda ise),
-    Simülasyon stoğuna daha önce eklenmiş olan bu miktarı geri düşeriz.
+    Siparişi siler.
+    Simülasyon stoğu trigger tarafından otomatik düzeltilir.
     """
-    # 1. Siparişi bul
-    orders = run_query("SELECT item_id, amount, actual_coming_date FROM purchase WHERE id = %s", (order_id,))
-    
-    if not orders.empty:
-        order = orders.iloc[0]
-        # Eğer henüz gelmemişse (YOLDAYSAN), simülasyon stoğundan düşmeliyiz
-        if pd.isna(order['actual_coming_date']) or order['actual_coming_date'] is None:
-            # Simülasyon stoğundan düş (Negatif update)
-            # NOT: Bu sadece o anlık simülasyon tablosunu düzeltir.
-            # Reset atılınca zaten VT'den okuyacağı için sorun kalmaz.
-            run_command("""
-            UPDATE sip_harita_active_inventory 
-            SET current_stock = current_stock - %s 
-            WHERE item_id = %s
-            """, (float(order['amount']), str(order['item_id'])))
-            
-    # 2. Sil
     sql = "DELETE FROM purchase WHERE id = %s"
     return run_command(sql, (order_id,))
 
@@ -62,26 +39,41 @@ def receive_order(order_id, actual_coming_date):
     """
     Siparişin geldiğini işaretler (Teslim Alma).
     Status kolonu 'generated always' olduğu için otomatik güncellenir.
+    Ayrıca depoya giriş hareketi (stock_movement) oluşturur.
     """
+    # 1. Sipariş bilgilerini çek (item_id ve amount için)
+    order_df = run_query("SELECT item_id, amount FROM purchase WHERE id = %s", (order_id,))
+    if order_df.empty:
+        raise ValueError(f"Sipariş bulunamadı: {order_id}")
+    
+    item_id = order_df.iloc[0]['item_id']
+    amount = float(order_df.iloc[0]['amount'])
+    
+    # 2. Siparişi güncelle
     sql = """
     UPDATE purchase 
     SET actual_coming_date = %s
     WHERE id = %s
     """
-    return run_command(sql, (actual_coming_date, order_id))
+    run_command(sql, (actual_coming_date, order_id))
+    
+    # 3. Depoya giriş hareketi oluştur (trigger active_inventory'yi güncelleyecek)
+    add_stock_movement(item_id, amount, 'giriş', actual_coming_date)
+    
+    return True
 
 def update_order(order_id, item_id=None, supplier_id=None, amount=None, purpose=None, purchase_date=None, expected_coming_date=None):
     """
-    Sarişi günceller (Edit).
+    Siparişi günceller (Edit).
     """
     fields = []
     params = []
     
-    if item_id:
+    if item_id is not None:
         fields.append("item_id = %s")
         params.append(item_id)
         
-    if supplier_id:
+    if supplier_id is not None:
         fields.append("supplier_id = %s")
         params.append(supplier_id)
         
@@ -89,15 +81,15 @@ def update_order(order_id, item_id=None, supplier_id=None, amount=None, purpose=
         fields.append("amount = %s")
         params.append(amount)
         
-    if purpose:
+    if purpose is not None:
         fields.append("purpose = %s")
         params.append(purpose)
         
-    if purchase_date:
+    if purchase_date is not None:
         fields.append("purchase_date = %s")
         params.append(purchase_date)
         
-    if expected_coming_date:
+    if expected_coming_date is not None:
         fields.append("expected_coming_date = %s")
         params.append(expected_coming_date)
         

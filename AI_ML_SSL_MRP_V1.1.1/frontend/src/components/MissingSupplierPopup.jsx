@@ -1,16 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle, Save, Truck } from 'lucide-react';
+import { AlertCircle, CheckCircle, Save, Truck, AlertTriangle, Factory } from 'lucide-react';
 import api from '../api';
 
 const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [formData, setFormData] = useState({
         supplier_id: '',
-        given_leadtime: 7,
-        lot_size: 0
+        given_leadtime: '',
+        lot_size: ''
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [existingSuppliers, setExistingSuppliers] = useState([]);
+
+    useEffect(() => {
+        const fetchSuppliers = async () => {
+            try {
+                const response = await api.get('/suppliers');
+                const data = response.data.data || response.data || [];
+                const uniqueIds = [...new Set(data.map(s => s.supplier_id))];
+                setExistingSuppliers(uniqueIds);
+            } catch (err) {
+                console.error("Error fetching suppliers:", err);
+            }
+        };
+        fetchSuppliers();
+    }, []);
 
     const currentItem = missingItems[currentIndex];
 
@@ -19,8 +34,8 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
         if (currentItem) {
             setFormData({
                 supplier_id: '',
-                given_leadtime: 7,
-                lot_size: 0
+                given_leadtime: '',
+                lot_size: ''
             });
             setError('');
         }
@@ -41,7 +56,13 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
         setError('');
 
         if (!formData.supplier_id) {
-            setError('Lütfen bir tedarikçi ID giriniz.');
+            setError('Lütfen bir tedarikçi Kodu giriniz.');
+            setLoading(false);
+            return;
+        }
+
+        if (parseFloat(formData.given_leadtime) < 0 || parseFloat(formData.lot_size) < 0) {
+            setError("Lütfen geçerli değerler girin (Negatif sayı girilemez).");
             setLoading(false);
             return;
         }
@@ -50,8 +71,8 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
             const payload = {
                 item_id: currentItem.item_id,
                 supplier_id: formData.supplier_id,
-                given_leadtime: parseFloat(formData.given_leadtime),
-                lot_size: parseFloat(formData.lot_size),
+                given_leadtime: parseFloat(formData.given_leadtime) || 0,
+                lot_size: parseFloat(formData.lot_size) || 0,
                 status: 'Aktif',
                 calculated: false
             };
@@ -72,9 +93,38 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
         }
     };
 
+    const handleInternalProduction = async () => {
+        setLoading(true);
+        setError('');
+
+        try {
+            const payload = {
+                item_id: currentItem.item_id,
+                supplier_id: 'DAHİLİ',
+                given_leadtime: 0,
+                lot_size: 0,
+                status: 'Aktif',
+                calculated: false
+            };
+
+            await api.post('/suppliers', payload);
+
+            if (currentIndex < missingItems.length - 1) {
+                setCurrentIndex(prev => prev + 1);
+            } else {
+                onComplete();
+            }
+        } catch (err) {
+            console.error("Error adding internal supplier:", err);
+            setError('Kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-red-100 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-red-100 overflow-hidden relative">
 
                 {/* Header - Kırmızı Alarm */}
                 <div className="bg-red-50 p-6 border-b border-red-100">
@@ -120,25 +170,33 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Tedarikçi Kodu (Supplier ID)</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Tedarikçi Kodu</label>
                             <input
                                 type="text"
                                 name="supplier_id"
                                 value={formData.supplier_id}
                                 onChange={handleChange}
-                                placeholder="Örn: SUP_001"
+                                list="missing-sup-id-options"
+                                placeholder="Tedarikçi Seçiniz veya Yazınız (Örn: SUP_001)"
                                 className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                 autoFocus
                             />
+                            <datalist id="missing-sup-id-options">
+                                {existingSuppliers.map((supId) => (
+                                    <option key={supId} value={supId} />
+                                ))}
+                            </datalist>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Termin (Gün)</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Leadtime (Gün)</label>
                                 <input
                                     type="number"
+                                    min="0"
                                     name="given_leadtime"
                                     value={formData.given_leadtime}
+                                    placeholder="0"
                                     onChange={handleChange}
                                     className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                 />
@@ -147,8 +205,10 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Lot Size</label>
                                 <input
                                     type="number"
+                                    min="0"
                                     name="lot_size"
                                     value={formData.lot_size}
+                                    placeholder="0"
                                     onChange={handleChange}
                                     className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                 />
@@ -161,20 +221,32 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
                             </div>
                         )}
 
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {loading ? (
-                                <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span>
-                            ) : (
-                                <>
-                                    <Save size={20} />
-                                    Kaydet ve Devam Et
-                                </>
-                            )}
-                        </button>
+                        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                            <button
+                                type="button"
+                                onClick={handleInternalProduction}
+                                disabled={loading}
+                                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 border border-gray-200 disabled:opacity-50"
+                            >
+                                <Factory size={20} className="text-gray-500" />
+                                Bizde Üretiliyor
+                            </button>
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {loading ? (
+                                    <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span>
+                                ) : (
+                                    <>
+                                        <Save size={20} />
+                                        Tedarikçi Kaydet
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>

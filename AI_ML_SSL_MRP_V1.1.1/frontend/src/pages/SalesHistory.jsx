@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { Search, Plus, Trash2, Edit2, X, CheckCircle2, History, Calendar } from "lucide-react";
+import { Search, Trash2, Edit2, X, CheckCircle2, History, Calendar } from "lucide-react";
 import api from "../api";
+import toast from "react-hot-toast";
+import ConfirmModal from "../components/ConfirmModal";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 const SalesHistory = () => {
     const [sales, setSales] = useState([]);
@@ -10,11 +13,13 @@ const SalesHistory = () => {
         startDate: "",
         endDate: "",
     });
-    const [isModalOpen, setIsModalOpen] = useState(false);
 
     // Inline Editing States
     const [editingId, setEditingId] = useState(null);
     const [editForm, setEditForm] = useState({});
+
+    // Confirmation Modal State
+    const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, id: null });
 
     useEffect(() => {
         fetchSales();
@@ -32,25 +37,14 @@ const SalesHistory = () => {
         }
     };
 
-    const handleAddSale = async (newSale) => {
-        try {
-            await api.post("/sales", newSale);
-            fetchSales();
-            setIsModalOpen(false);
-        } catch (error) {
-            console.error("Error adding sale:", error);
-            alert("Satış eklenirken hata oluştu.");
-        }
-    };
-
     const handleDelete = async (id) => {
-        if (!window.confirm("Bu satış kaydını silmek istediğinize emin misiniz?")) return;
         try {
             await api.delete(`/sales/${id}`);
+            toast.success("Satış kaydı silindi.");
             fetchSales();
         } catch (error) {
             console.error("Error deleting sale:", error);
-            alert("Silme işlemi başarısız.");
+            toast.error("Silme işlemi başarısız.");
         }
     };
 
@@ -73,11 +67,12 @@ const SalesHistory = () => {
                 amount: parseFloat(editForm.amount),
                 date: editForm.date
             });
+            toast.success("Satış kaydı güncellendi.");
             fetchSales();
             setEditingId(null);
         } catch (error) {
             console.error("Error updating sale:", error);
-            alert("Güncelleme başarısız.");
+            toast.error("Güncelleme başarısız.");
         }
     };
 
@@ -98,6 +93,9 @@ const SalesHistory = () => {
         });
     }, [sales, filters]);
 
+    // Infinite scroll hook
+    const { visibleData, hasMore, loaderRef, visibleCount, totalCount } = useInfiniteScroll(filteredData, filters);
+
     const handleInputChange = (e) => {
         setFilters({ ...filters, [e.target.name]: e.target.value });
     };
@@ -107,7 +105,7 @@ const SalesHistory = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 h-full flex flex-col">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -116,17 +114,10 @@ const SalesHistory = () => {
                     </h1>
                     <p className="text-gray-500 mt-1">Gerçekleşen satış çıkış kayıtları ve düzeltmeleri.</p>
                 </div>
-                <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-purple-500/20 active:scale-95"
-                >
-                    <Plus size={20} />
-                    <span>Yeni Satış Ekle</span>
-                </button>
             </div>
 
             {/* Filter */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-4">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-4 shrink-0">
                 <div className="relative flex-1 w-full md:min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input
@@ -172,19 +163,21 @@ const SalesHistory = () => {
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50 border-b border-gray-100">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col min-h-0">
+                <div className="flex-1 overflow-y-auto">
+                    <table className="w-full relative">
+                        <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                             <tr>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tarih</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ürün Kodu</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Miktar</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sip No</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Müşteri</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">İşlemler</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredData.map((item) => {
+                            {visibleData.map((item) => {
                                 const isEditing = editingId === item.id;
                                 return (
                                     <tr key={item.id} className={`hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-purple-50/50" : ""}`}>
@@ -215,6 +208,12 @@ const SalesHistory = () => {
                                                 item.amount
                                             )}
                                         </td>
+                                        <td className="px-6 py-4 text-sm text-gray-600">
+                                            {item.order_id ? `#${item.order_id}` : "-"}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-600">
+                                            {item.customer_name || "-"}
+                                        </td>
                                         <td className="px-6 py-4 text-right text-sm font-medium">
                                             {isEditing ? (
                                                 <div className="flex items-center justify-end gap-2">
@@ -230,7 +229,7 @@ const SalesHistory = () => {
                                                     <button onClick={() => startEditing(item)} className="text-blue-600 hover:text-blue-900 bg-blue-50 p-2 rounded-lg">
                                                         <Edit2 size={16} />
                                                     </button>
-                                                    <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-lg">
+                                                    <button onClick={() => setConfirmDelete({ isOpen: true, id: item.id })} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-lg">
                                                         <Trash2 size={16} />
                                                     </button>
                                                 </div>
@@ -241,110 +240,25 @@ const SalesHistory = () => {
                             })}
                         </tbody>
                     </table>
+                    {/* Infinite scroll loader */}
+                    {hasMore && (
+                        <div ref={loaderRef} className="flex justify-center py-4">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+                        </div>
+                    )}
+                    <div className="text-center text-sm text-gray-400 py-2">
+                        {visibleCount} / {totalCount} kayıt gösteriliyor
+                    </div>
                 </div>
             </div>
 
-            {/* Modal */}
-            {isModalOpen && <NewSaleModal onClose={() => setIsModalOpen(false)} onSubmit={handleAddSale} />}
-        </div>
-    );
-};
-
-const NewSaleModal = ({ onClose, onSubmit }) => {
-    const [products, setProducts] = useState([]);
-
-    useEffect(() => {
-        const fetchProducts = async () => {
-            try {
-                const response = await api.get("/products");
-                setProducts(response.data.data || response.data || []);
-            } catch (error) {
-                console.error("Error fetching products:", error);
-            }
-        };
-        fetchProducts();
-    }, []);
-
-    const [formData, setFormData] = useState({
-        item_id: "",
-        amount: "",
-        date: new Date().toISOString().split('T')[0],
-    });
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        onSubmit({
-            ...formData,
-            amount: parseFloat(formData.amount)
-        });
-    };
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
-                <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-bold text-gray-900">Yeni Satış Kaydı</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Ürün Kodu</label>
-                        <input
-                            type="text"
-                            required
-                            list="product-options"
-                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
-                            value={formData.item_id}
-                            onChange={(e) => setFormData({ ...formData, item_id: e.target.value })}
-                            placeholder="Ürün Seçiniz veya Yazınız"
-                        />
-                        <datalist id="product-options">
-                            {products.map((p) => (
-                                <option key={p.item_id} value={p.item_id} />
-                            ))}
-                        </datalist>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Miktar</label>
-                        <input
-                            type="number"
-                            required
-                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tarih</label>
-                        <input
-                            type="date"
-                            required
-                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
-                            value={formData.date}
-                            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                        />
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
-                        >
-                            İptal
-                        </button>
-                        <button
-                            type="submit"
-                            className="flex-1 px-4 py-2 text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-medium shadow-lg shadow-purple-500/20"
-                        >
-                            Kaydet
-                        </button>
-                    </div>
-                </form>
-            </div>
+            <ConfirmModal
+                isOpen={confirmDelete.isOpen}
+                onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+                onConfirm={() => handleDelete(confirmDelete.id)}
+                title="Satış Kaydını Sil"
+                message="Bu satış kaydını silmek istediğinize emin misiniz? Bu işlem stokları geri döndürmez."
+            />
         </div>
     );
 };

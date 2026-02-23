@@ -1,100 +1,98 @@
-# 🏛️ Sistem Mimarisi ve Teknik Genel Bakış (System Architecture)
+# 🏛️ Sistem Mimarisi ve Teknik Derinlik (System Architecture)
 
 ## 1. Giriş
-**AI-ML SSL MRP**, yapay zeka destekli bir Malzeme İhtiyaç Planlama (MRP) sistemidir. Geleneksel MRP sistemlerinden farklı olarak, stok seviyelerini belirlerken sadece statik formülleri değil, **Makine Öğrenmesi (ML)** ve **Zaman Serisi Analizi (Time Series)** yöntemlerini kullanır.
+**AI-ML SSL MRP**, yapay zeka destekli, dinamik bir Malzeme İhtiyaç Planlama (MRP) sistemidir. Klasik MRP'nin "statik stok seviyesi" mantığını reddeder ve bunun yerine **geleceği tahmin eden** ve **riski hesaplayan** bir yapı sunar.
 
 ## 2. Teknoloji Yığını (Tech Stack)
 
 ### 🖥️ Frontend (Kullanıcı Arayüzü)
-*   **Framework:** React (+ Vite)
-*   **Dil:** JavaScript (ES6+)
-*   **Stil:** TailwindCSS
-*   **İkon Seti:** Lucide React
-*   **Http İstemcisi:** Axios
+*   **Core:** React 18 (Vite Build Tool ile)
+*   **State Management:** React Hooks (`useState`, `useContext`, `useReducer`)
+*   **UI Library:** TailwindCSS (Utility-first styling) & Lucide React Icons
+*   **Data Fetching:** Axios (Interceptor yapısı ile)
+*   **Routing:** React Router DOM v6
 
-### ⚙️ Backend (Sunucu ve İş Mantığı)
-*   **Framework:** FastAPI (Python)
-*   **Dil:** Python 3.9+
-*   **Veritabanı Sürücüsü:** Psycopg2
-*   **Veri İşleme:** Pandas, NumPy
+### ⚙️ Backend (Core Logic)
+*   **Framework:** FastAPI (Asenkron, yüksek performanslı Python framework)
+*   **Data Operations:** Pandas & NumPy (Vektörel veri işleme)
+*   **Concurrency:** Thread-Local Storage (Simülasyon izolasyonu için)
+*   **Validation:** Pydantic (Strict typing)
 
-### 🧠 Yapay Zeka ve Analitik (AI Core)
-*   **Tahminleme (Forecasting):** Facebook Prophet
-*   **Optimizasyon (Safety Stock):** LightGBM (Gradient Boosting)
-*   **Simülasyon:** Özel Geliştirilmiş Recursive BOM Explosion Algoritması
+### 🧠 Yapay Zeka ve Analitik (AI Engine)
+*   **Talep Tahmini (Demand Forecasting):** Facebook Prophet
+    *   *Neden?* Mevsimsellik, tatiller ve trend değişimlerini yakalamak için.
+*   **Güvenlik Stoğu Optimizasyonu:** LightGBM (Gradient Boosting Machine)
+    *   *Neden?* Tedarikçi gecikmelerini ve talep sapmalarını (nonlinear ilişkileri) modellemek için.
 
 ### 🗄️ Veritabanı
-*   **Motor:** PostgreSQL
-*   **Özellikler:** Stored Procedures, Triggers, Generated Columns (King's Formula için)
+*   **DB:** PostgreSQL 14+
+*   **Advanced Features:**
+    *   `PL/pgSQL` Triggerlar (Otomatik stok düşüşü, istatistik hesaplama)
+    *   `ENUM` Types (Veri bütünlüğü için strict tipler)
+    *   `GENERATED COLUMNS` (Otomatik hesaplanan alanlar, örn: King's Formula sonucu)
 
 ---
 
-## 3. Sistem Bileşen Diyagramı
+## 3. Kritik Mühendislik Çözümleri
 
-```mermaid
-graph TD
-    User["Kullanıcı / Tarayıcı"] -- "HTTP Request/JSON" --> API["FastAPI Backend"]
-    
-    subgraph "Backend Layer"
-        API --> Router["API Routers"]
-        Router --> CRUD["CRUD Modules"]
-        Router --> SimEngine["Simulation Engine"]
-        Router --> AI["AI Manager"]
-    end
-    
-    subgraph "AI & Analytics Layer"
-        AI --> Prophet["Prophet (Talep Tahmini)"]
-        AI --> LGBM["LightGBM (Güvenlik Stoğu)"]
-        SimEngine --> BOM["Recursive BOM Exploder"]
-    end
-    
-    subgraph "Data Layer"
-        CRUD <--> DB[("PostgreSQL Database")]
-        SimEngine <--> DB
-        Prophet <--> DB
-        LGBM <--> DB
-    end
-```
+### 🔄 Recursive BOM Explosion (Özyinelemeli Reçete Patlatma)
+Sipariş simülasyonunda, bir ürünün üretilmesi için gereken alt parçaları bulmak gerekir. Bu sistemde BOM yapısı **Sınırsız Derinlikte** olabilir.
+*   **Algoritma:** Depth-First Search (DFS) tabanlı recursive patlatma.
+*   **Optimizasyon:** `sim_bom_explosion.py` içinde her bir sipariş için özel `_thread_local` storage kullanılır. Bu sayede aynı anda birden fazla sipariş işlense bile (multi-threaded server) veriler birbirine karışmaz.
 
-## 4. Temel Veri Akışı (Data Flow)
+### 🧵 Thread-Local Simulation Context
+Simülasyon sırasında her siparişin "sanal tüketimi" takip edilmelidir.
+*   FastAPI async çalıştığı için global değişken kullanılamaz.
+*   Çözüm: `threading.local()` kullanılarak her request/simülasyon adımına özel bir `_missing_suppliers` ve `_current_order_id` bağlamı yaratılır.
+*   Böylece, `sim_manager.py` içindeki `process_demand` fonksiyonu, veritabanına gitmeden bellekteki bu context üzerinden hızlıca eksik tedarikçileri toplar.
 
-Sistemin "Kalbi" olan **Sipariş -> Simülasyon -> Satın Alma** döngüsü şu şekilde işler:
+### ⚡ Trigger-Based Consistency (Trigger Tabanlı Tutarlılık)
+Veri tutarlılığı uygulama katmanına (Python) bırakılmamıştır, veritabanı katmanında (SQL) garanti altına alınmıştır.
+*   **Reversal Logic:** Bir stok hareketi silindiğinde veya güncellendiğinde, trigger önce **eski işlemin etkisini geri alır**, sonra **yeni işlemi uygular**.
+    *   Örn: "Giriş" silinirse stok düşer. "Çıkış" silinirse stok artar.
+*   **Analitik Senkronizasyonu:** Satın alma yapıldığında tedarikçi performansı (`supplier_item`) otomatik güncellenir.
 
-1.  **Sipariş Girişi:**
-    *   Kullanıcı Frontend üzerinden bir `Müşteri Siparişi` girer.
-    *   API bunu `customer_orders` tablosuna kaydeder.
+---
 
-2.  **Simülasyon Tetiklenmesi:**
-    *   Sipariş girildiği an, **Simulation Engine** devreye girer.
-    *   Ürünün reçetesi (BOM) en alt seviyeye kadar patlatılır.
-    *   Mevcut stok ve yoldaki siparişler zaman çizelgesine yerleştirilir.
+## 4. AI Pipeline Akışı
 
-3.  **Eksik Tespiti (Shortage):**
-    *   Simülasyon sonucunda eğer bir hammadde eksiği çıkarsa, `sim_simulation_suggestions` tablosuna bir kayıt atılır.
-    *   Bu kayıt Frontend'de "Sipariş Haritası" ekranında **Uyarı** olarak görünür.
+Sistemdeki yapay zeka akışı 3 adımdan oluşur:
 
-4.  **AI Devreye Girmesi (Gece Operasyonu veya Manuel):**
-    *   **Prophet:** Geçmiş satışlardan gelecek ayın talebini tahmin eder.
-    *   **LightGBM:** Tedarikçi risklerini analiz edip "Ne kadar güvenlik stoğu tutmalıyız?" sorusunu cevaplar.
+1.  **Veri Hazırlığı (Data Prep):**
+    *   `sales_out_history` tablosundan geçmiş satış verileri çekilir.
+    *   `orders` tablosundan tedarikçi gecikme verileri (`delay_day`) çekilir.
+
+2.  **Tahminleme (Forecasting - Prophet):**
+    *   Her ürün için ayrı bir Prophet modeli eğitilir.
+    *   Gelecek 12 ayın talebi tahmin edilir (`prophet.run_full_analysis`).
+    *   Sonuçlar `prophet_table_temporary` tablosuna yazılır.
+
+3.  **Optimizasyon (Optimization - LightGBM):**
+    *   Tedarikçi riski (Lead Time deviation) ve Talep belirsizliği (Demand deviation) input olarak alınır.
+    *   Model, "Servis Seviyesi" hedefine (örn: %95) ulaşmak için gereken optimum stoku tahmin eder.
+    *   Sonuçlar `ss_ai_temporary` tablosuna yazılır.
+
+---
 
 ## 5. Klasör Yapısı (Directory Structure)
 
 ```
 .
-├── backend/               # Python/FastAPI Sunucu Kodları
-│   ├── AI_ML/             # Prophet ve LightGBM Modelleri
-│   ├── crud/              # Veritabanı Okuma/Yazma İşlemleri
-│   ├── database/          # Veritabanı Bağlantı ve Kurulum Dosyaları
-│   ├── simulation/        # Simülasyon ve BOM Patlatma Mantığı
-│   └── main.py            # API Giriş Noktası
+├── backend/
+│   ├── AI_ML/             # Prophet ve LightGBM model eğitim/tahmin kodları
+│   ├── crud/              # Veritabanı işlemleri (Transaction management)
+│   ├── database/          # DB bağlantısı, şema kurulumu (setup.py)
+│   ├── simulation/        # Simülasyon motoru (BOM patlatma, thread-local logic)
+│   ├── config.py          # Env değişkenleri
+│   ├── logger.py          # Merkezi loglama
+│   └── main.py            # API Gateway (FastAPI)
 │
-├── frontend/              # React Arayüz Kodları
+├── frontend/
 │   ├── src/
-│   │   ├── components/    # Ortak Bileşenler (Tablo, Buton vb.)
-│   │   ├── pages/         # Uygulama Sayfaları
-│   │   └── api.js         # Backend Bağlantı Ayarları
+│   │   ├── components/    # Reusable UI bileşenleri
+│   │   ├── hooks/         # Custom Hooks (useInfiniteScroll vb.)
+│   │   ├── pages/         # Sayfa bileşenleri
+│   │   └── api.js         # Axios instance
 │
-└── system_documentation/  # Proje Dokümantasyonu
-    ├── user_manuals/      # Kullanıcı Kılavuzları
-    └── technical_reference/ # Teknik Algoritma Açıklamaları
+└── system_documentation/  # Proje teknik dokümanları
 ```

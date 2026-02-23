@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from backend.simulation.sim_bom_explosion import process_demand, set_current_order_id, clear_current_order_id, reverse_order_effects, get_missing_suppliers
 from backend.config import DB_CONFIG
-
+from backend.crud.stock import add_stock_movement
 from backend.database.db_helper import get_db_connection, release_db_connection
 from backend.logger import get_logger
 
@@ -19,7 +19,7 @@ class CustomerOrderCreate(BaseModel):
     order_date: date
     expected_delivery_date: Optional[date] = None
     production_time_days: Optional[int] = None
-    delivery_date: Optional[date] = None # Gerçekleşen teslim tarihi olabilir veya planlanan? Kullanıcı "Teslim Tarihi" dedi.
+    delivery_date: Optional[date] = None
     status: Optional[str] = "Bekleniyor"
 
 class CustomerOrderUpdate(BaseModel):
@@ -53,9 +53,6 @@ def create_customer_order(order: CustomerOrderCreate):
         new_order = cur.fetchone()
         conn.commit()
         
-        # Trigger Simulation Update OR Stock Movement
-        # We do this AFTER commit to ensure order exists in DB
-        
         if new_order['status'] == 'Sevk Edildi':
             # Handle Direct Shipment Creation
             try:
@@ -63,12 +60,12 @@ def create_customer_order(order: CustomerOrderCreate):
                      new_order['item_id'], 
                      float(new_order['amount']), 
                      'satış_çıkışı', 
-                     new_order['delivery_date'] or date.today()
+                     new_order['delivery_date'] or date.today(),
+                     new_order['id']
                  )
             except Exception as e:
                 logger.error(f"Error recording shipment movement: {e}")
         else:
-             # Regular Active Order -> Simulation
              try:
                  # Set order context for effect tracking
                  set_current_order_id(new_order['id'])
@@ -79,8 +76,7 @@ def create_customer_order(order: CustomerOrderCreate):
                  due_date = new_order.get('expected_delivery_date') or new_order.get('order_date')
                  prod_time = new_order.get('production_time_days') or 0
                  
-                 # Pass visited set as None internally
-                 process_demand(new_order['item_id'], new_order['amount'], due_date, prod_time)
+                 process_demand(new_order['item_id'], float(new_order['amount']), due_date, prod_time)
                  
                  # Collect any items without suppliers
                  missing = get_missing_suppliers()
@@ -112,13 +108,11 @@ def get_customer_orders():
         cur.close()
         release_db_connection(conn)
 
-# Import add_stock_movement
-from backend.crud.stock import add_stock_movement
-from datetime import date
 
 def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+    warnings = []
     try:
         # 1. Fetch current order to compare status/values
         cur.execute("SELECT * FROM customer_orders WHERE id = %s", (order_id,))
@@ -126,6 +120,10 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
         
         if not current_order:
             return None
+            
+        # --- SAFEGUARD: Prevent editing 'Sevk Edildi' orders ---
+        if current_order['status'] == 'Sevk Edildi':
+            raise ValueError("HATA: 'Sevk Edildi' durumundaki siparişler düzenlenemez! Gerekirse silip yeniden oluşturun.")
             
         # Build dynamic query
         fields = []
@@ -147,7 +145,7 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
             values.append(updates.status)
         
         if not fields:
-            return current_order
+            return {"order": dict(current_order), "warnings": warnings}
 
         values.append(order_id)
         query = f"UPDATE customer_orders SET {', '.join(fields)} WHERE id = %s RETURNING *"
@@ -159,7 +157,6 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
         # 3. Apply Update
         cur.execute(query, tuple(values))
         updated_order = cur.fetchone()
-        conn.commit()
         
         # 4. Handle Logic based on NEW status
         new_status = updated_order['status']
@@ -170,29 +167,35 @@ def update_customer_order(order_id: int, updates: CustomerOrderUpdate):
 
         if new_status == 'Sevk Edildi':
             # Order Shipped -> Reduced Physical Stock
-            # If it wasn't shipped before, deduct stock
             if current_order['status'] != 'Sevk Edildi':
-                # Deduct inventory
-                add_stock_movement(
-                    updated_order['item_id'], 
-                    float(updated_order['amount']), 
-                    'satış_çıkışı', 
-                    updated_order['delivery_date'] or date.today()
+                delivery_date = updated_order['delivery_date'] or date.today()
+                cur.execute(
+                    "INSERT INTO stock_movement (item_id, amount, purpose, date, order_id) VALUES (%s, %s, %s, %s, %s)",
+                    (updated_order['item_id'], float(updated_order['amount']), 'satış_çıkışı', delivery_date, order_id)
                 )
+            conn.commit()
+        else:
+            conn.commit()
                 
-        elif new_status in ('Bekleniyor', 'Üretimde'):
+        if new_status in ('Bekleniyor', 'Üretimde'):
             # Order is still active -> Re-Simulate with new values
             try:
                 set_current_order_id(updated_order['id'])
                 due_date = updated_order.get('expected_delivery_date') or updated_order.get('order_date')
                 prod_time = updated_order.get('production_time_days') or 0
                 process_demand(updated_order['item_id'], float(updated_order['amount']), due_date, int(prod_time) if prod_time else 0)
+                
+                # Collect any items without suppliers
+                missing = get_missing_suppliers()
+                if missing:
+                    warnings.extend([{"item_id": item_id, "type": "missing_supplier"} for item_id in missing])
             except Exception as sim_error:
                 logger.warning(f"Simulation Update Warning during Update: {sim_error}")
+                warnings.append({"type": "simulation_error", "message": str(sim_error)})
             finally:
                 clear_current_order_id()
                 
-        return updated_order
+        return {"order": dict(updated_order), "warnings": warnings}
     except Exception as e:
         conn.rollback()
         raise e

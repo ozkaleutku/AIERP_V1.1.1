@@ -1,6 +1,6 @@
 # 🚀 Kurulum ve Dağıtım Kılavuzu (Deployment Guide)
 
-Bu proje, Python (FastAPI) ve Node.js (React) tabanlı modern bir web uygulamasıdır. Aşağıdaki adımları takiperek projeyi kendi bilgisayarınızda veya sunucuda çalıştırabilirsiniz.
+Bu proje, Python (FastAPI) ve Node.js (React) tabanlı modern bir web uygulamasıdır. Aşağıdaki adımları takip ederek projeyi kendi bilgisayarınızda veya sunucuda çalıştırabilirsiniz.
 
 ## 1. Ön Gereksinimler (Prerequisites)
 Sistemi çalıştırmadan önce bilgisayarınızda şunların kurulu olması gerekir:
@@ -14,22 +14,23 @@ Sistemi çalıştırmadan önce bilgisayarınızda şunların kurulu olması ger
 
 ## 2. Veritabanı Kurulumu
 
-1.  PostgreSQL'i açın ve `nu_mrp_db` adında boş bir veritabanı oluşturun.
+1.  PostgreSQL'i (pgAdmin veya komut satırı ile) açın.
+2.  `AI_ML_SS_MRP` adında **boş** bir veritabanı oluşturun:
     ```sql
-    CREATE DATABASE nu_mrp_db;
+    CREATE DATABASE "AI_ML_SS_MRP";
     ```
-2.  Veritabanına erişim için bir kullanıcı oluşturun (veya `postgres` kullanıcısını kullanın).
+    *(Not: Büyük/küçük harf duyarlılığı için tırnak içine almanız önerilir)*
 
 ---
 
 ## 3. Backend Kurulumu
 
-1.  Backend klasörüne gidin:
+1.  Terminali açın ve `backend` klasörüne gidin:
     ```bash
     cd backend
     ```
 
-2.  Sanal ortam (Virtual Environment) oluşturun (Opsiyonel ama önerilir):
+2.  Sanal ortam (Virtual Environment) oluşturun (Önerilir):
     ```bash
     python -m venv venv
     .\venv\Scripts\activate   # Windows için
@@ -41,26 +42,29 @@ Sistemi çalıştırmadan önce bilgisayarınızda şunların kurulu olması ger
     pip install -r requirements.txt
     ```
 
-4.  `.env` dosyasını yapılandırın:
-    *   `config.py` dosyası varsayılan olarak yerel ayarları kullanır. Eğer şifreniz farklıysa `DB_PASSWORD` alanını düzenleyin.
+4.  `.env` ayarları:
+    *   Sistem varsayılan olarak `backend/config.py` içindeki ayarları kullanır.
+    *   Veritabanı şifreniz `postgres` değilse, bir `.env` dosyası oluşturun veya Environment Variable olarak tanımlayın:
+        `DB_PASSWORD=sifreniz`
 
 5.  Veritabanı tablolarını oluşturun (İlk kurulum):
     ```bash
     python database/database_setup.py
     ```
+    *Bu işlem tabloları, triggerları ve enum tiplerini oluşturacaktır.*
 
 6.  Sunucuyu başlatın:
     ```bash
     python main.py
     ```
-    *   API şu adreste çalışacaktır: `http://localhost:8000`
-    *   Swagger Dokümantasyonu: `http://localhost:8000/docs`
+    *   Backend şu adreste çalışacaktır: `http://localhost:8000`
+    *   Swagger API Dokümantasyonu: `http://localhost:8000/docs`
 
 ---
 
 ## 4. Frontend Kurulumu
 
-1.  Yeni bir terminal açın ve Frontend klasörüne gidin:
+1.  Yeni bir terminal açın ve `frontend` klasörüne gidin:
     ```bash
     cd frontend
     ```
@@ -79,45 +83,36 @@ Sistemi çalıştırmadan önce bilgisayarınızda şunların kurulu olması ger
 ---
 
 ## 5. Tek Tıkla Başlatma (Windows)
+
 Geliştirme süreci için ana dizindeki `start_project.bat` dosyasına çift tıklayarak hem Backend hem Frontend'i aynı anda başlatabilirsiniz.
+*Bu script, backend ve frontend için ayrı komut satırı pencereleri açar.*
 
 ---
 
 ## 6. Port Değiştirme (Port Configuration)
-Varsayılan portlar (Backend: 8000, Frontend: 5173) çakışıyorsa veya değiştirmek istiyorsanız aşağıdaki dosyaları düzenleyin:
 
-### A. Backend Portunu Değiştirme (API Sunucusu)
+Varsayılan portlar (Backend: 8000, Frontend: 5173) çakışıyorsa veya değiştirmek istiyorsanız:
+
+### A. Backend Portunu Değiştirme
 1.  `backend/main.py` dosyasını açın.
-2.  Dosyanın en altındaki `uvicorn.run` satırını bulun:
-    ```python
-    if __name__ == "__main__":
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
-    ```
-3.  `port=8000` değerini istediğiniz yeni port numarasıyla değiştirin (Örn: `port=9090`).
+2.  En alttaki `uvicorn.run(app, host="0.0.0.0", port=8000)` satırındaki `8000` değerini değiştirin.
 
-### B. Frontend Portunu Değiştirme (Web Arayüzü)
+### B. Frontend Portunu Değiştirme
 1.  `frontend/package.json` dosyasını açın.
-2.  `scripts` altındaki `dev` komutunu bulun:
-    ```json
-    "dev": "vite --host",
-    ```
-3.  Sonuna `--port` parametresi ekleyin:
-    ```json
-    "dev": "vite --host --port 3000",
-    ```
+2.  `"dev": "vite --host"` komutunu `"dev": "vite --host --port 3000"` şeklinde güncelleyin.
 
-### C. Bağlantıyı Güncelleme (Kritik Adım!)
-Eğer **Backend** portunu değiştirdiyseniz, Frontend'in yeni adresi bilmesi gerekir. Bunu yapmazsanız "Network Error" alırsınız.
+### C. Bağlantıyı Güncelleme (Kritik!)
+Backend portunu değiştirdiyseniz Frontend'e bunu bildirmeniz gerekir:
 1.  `frontend/src/api.js` dosyasını açın.
-2.  `baseURL` satırındaki `8000` değerini yeni backend portunuzla değiştirin:
+2.  `baseURL` satırını güncelleyin:
     ```javascript
-    // Örnek: Backend portunu 9090 yaptıysanız:
-    baseURL: `http://${window.location.hostname}:9090/api`,
+    baseURL: `http://${window.location.hostname}:YENI_PORT/api`,
     ```
 
 ---
 
 ## 🛠️ Sorun Giderme
-*   **Port Hatası:** Eğer 8000 veya 5173 portları doluysa, scriptler hata verebilir. İlgili portları kullanan diğer uygulamaları kapatın.
-*   **Veritabanı Bağlantı Hatası:** `backend/config.py` içindeki şifre ve kullanıcı adının PostgreSQL kurulumunuzla eşleştiğinden emin olun.
+
+*   **ModuleNotFoundError**: `requirements.txt` dosyasındaki tüm paketlerin yüklü olduğundan emin olun (`pip list`).
+*   **FATAL: password authentication failed**: Veritabanı şifrenizin `config.py` veya ortam değişkenlerinde doğru ayarlandığını kontrol edin.
+*   **Network Error (Frontend)**: Backend sunucusunun çalıştığından (8000 portu) emin olun.

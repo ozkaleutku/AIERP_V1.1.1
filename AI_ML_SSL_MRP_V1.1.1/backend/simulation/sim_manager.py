@@ -1,5 +1,5 @@
 from backend.database.db_helper import run_query, run_command
-from backend.simulation.sim_bom_explosion import process_demand, set_current_order_id, clear_current_order_id
+from backend.simulation.sim_bom_explosion import process_demand, set_current_order_id, clear_current_order_id, get_missing_suppliers
 from datetime import date, datetime, timedelta
 import pandas as pd
 from backend.logger import get_logger
@@ -49,22 +49,26 @@ def initialize_simulation_table(from_active_inventory=True):
     """)
     
     if not df_orders.empty:
+        all_missing_suppliers = set()  # Accumulate across all orders
         for _, order in df_orders.iterrows():
             try:
                 set_current_order_id(int(order['id']))
                 due_date = order.get('expected_delivery_date') or order.get('order_date')
                 prod_time = order.get('production_time_days') or 0
                 process_demand(order['item_id'], float(order['amount']), due_date, int(prod_time) if prod_time else 0)
+                
+                # Collect missing suppliers before clearing
+                missing = get_missing_suppliers()
+                if missing:
+                    all_missing_suppliers.update(missing)
             except Exception as sim_error:
                 logger.warning(f"Simulation Replay Warning for order {order['id']}: {sim_error}")
             finally:
                 clear_current_order_id()
         
         # Check for missing suppliers discovered during simulation
-        from backend.simulation.sim_bom_explosion import get_missing_suppliers
-        missing = get_missing_suppliers()
-        if missing:
-            logger.warning(f"WARNING: The following items have NO SUPPLIER defined: {missing}")
+        if all_missing_suppliers:
+            logger.warning(f"WARNING: The following items have NO SUPPLIER defined: {list(all_missing_suppliers)}")
             # We could store this in a 'system_alerts' table if we had one.
         
         logger.info(f"Simulation reset complete. Replayed {len(df_orders)} orders.")
@@ -100,9 +104,10 @@ def get_simulation_suggestions():
             item_suppliers = df_all_suppliers[df_all_suppliers['item_id'] == item_id]
             if not item_suppliers.empty:
                 best = item_suppliers.iloc[0]  # Already sorted by leadtime ASC
+                lt = best['leadtime']
                 supplier_lookup[item_id] = {
                     'supplier_id': best['supplier_id'],
-                    'leadtime': float(best['leadtime'] or 7)
+                    'leadtime': float(lt) if lt is not None else None
                 }
     
     # 1. Scan for Negative Stock (Production/Purchase Need from Customer Orders)
@@ -129,28 +134,54 @@ def get_simulation_suggestions():
             item_type = row['item_type']
             
             # Lookup supplier from pre-fetched data
-            supplier_info = supplier_lookup.get(item_id, {'supplier_id': 'Bilinmiyor', 'leadtime': 7})
-            supplier_id = supplier_info['supplier_id']
-            leadtime = supplier_info['leadtime']
-             
-            # Get the deadline from the tracked due_date
-            # This is when the material MUST be available
-            deadline = row.get('earliest_due_date')
-            if deadline is None:
-                # Fallback: if no due_date was tracked, use today + a reasonable buffer
-                deadline = date.today() + timedelta(days=int(leadtime) + 7)
-            elif hasattr(deadline, 'date'):
-                deadline = deadline.date()
-            elif isinstance(deadline, str):
-                deadline = datetime.strptime(deadline, "%Y-%m-%d").date()
+            supplier_info = supplier_lookup.get(item_id)
             
-            # Calculate order_date: when to place the order to meet deadline
-            order_date = deadline - timedelta(days=int(leadtime))
+            if not supplier_info:
+                # No supplier defined or active
+                supplier_id = 'Bilinmiyor'
+                leadtime = 0 
+                status = "HATA: Tedarikçi Yok"
+                # We can't suggest a start date properly, but we list it as missing
+                deadline = row.get('earliest_due_date')
+                if deadline:
+                    if hasattr(deadline, 'date'): deadline = deadline.date()
+                    elif isinstance(deadline, str): deadline = datetime.strptime(deadline, "%Y-%m-%d").date()
+                    order_date = deadline # Immediate need
+                else:
+                    deadline = date.today()
+                    order_date = date.today()
+            else:
+                supplier_id = supplier_info['supplier_id']
+                leadtime = supplier_info['leadtime']
+                status = "Öneri"
+                
+                # If leadtime is None/Null from DB, we treat it as Warning
+                if leadtime is None:
+                     leadtime = 0
+                     status = "UYARI: Termin Süresi Girilmemiş"
+
+                # Get the deadline from the tracked due_date
+                # This is when the material MUST be available
+                deadline = row.get('earliest_due_date')
+                if deadline is None:
+                    # Fallback: if no due_date was tracked, use today + leadtime (ASAP)
+                    deadline = date.today() + timedelta(days=int(leadtime))
+                elif hasattr(deadline, 'date'):
+                    deadline = deadline.date()
+                elif isinstance(deadline, str):
+                    deadline = datetime.strptime(deadline, "%Y-%m-%d").date()
+            
+                # Calculate order_date: when to place the order to meet deadline
+                order_date = deadline - timedelta(days=int(leadtime))
             
             # Skip if order_date is in the past (don't show past suggestions)
+            # if order_date < date.today():
+            #     continue
+            
+            # Gecikmiş Sipariş Kontrolü
             if order_date < date.today():
-                continue
-
+                status = "Gecikmiş"
+            
             suggestions.append({
                 "item_id": item_id,
                 "amount": missing_amount,
@@ -159,7 +190,7 @@ def get_simulation_suggestions():
                 "order_date": order_date.strftime("%Y-%m-%d"),
                 "deadline_date": deadline.strftime("%Y-%m-%d"),
                 "leadtime": int(leadtime),
-                "status": "Öneri" if supplier_id != 'Bilinmiyor' else "HATA: Tedarikçi Yok"
+                "status": status
             })
 
     # 2. Scan for Safety Stock Violations
@@ -199,18 +230,28 @@ def get_simulation_suggestions():
                 diff = ss_target - current_sim_stock
                 # Logic: "o kadar sipariş oluşturuyor"
                 
-                # Lookup supplier from pre-fetched data (reusing supplier_lookup from earlier)
-                supplier_info = supplier_lookup.get(item_id, {'supplier_id': 'Bilinmiyor', 'leadtime': 7})
-                supplier_id = supplier_info['supplier_id']
-                leadtime = supplier_info['leadtime']
+                # Lookup supplier from pre-fetched data
+                supplier_info = supplier_lookup.get(item_id)
+                
+                if not supplier_info:
+                    supplier_id = 'Bilinmiyor'
+                    leadtime = 0
+                else:
+                    supplier_id = supplier_info['supplier_id']
+                    leadtime = supplier_info['leadtime']
+                    if leadtime is None: leadtime = 0
                 
                 # "sipariş tarihini de leadtime kadar geriye giderek söylüyor"
                 # Target Date = ss_date (Month Start)
                 order_date = ss_date - timedelta(days=int(leadtime))
                 
                 # Skip if order_date is in the past (don't show past suggestions)
+                # if order_date < date.today():
+                #     continue
+
+                status = "Öneri" if supplier_id != 'Bilinmiyor' else "HATA: Tedarikçi Yok"
                 if order_date < date.today():
-                    continue
+                    status = "Gecikmiş"
 
                 suggestions.append({
                     "item_id": item_id,
@@ -220,7 +261,7 @@ def get_simulation_suggestions():
                     "order_date": order_date.strftime("%Y-%m-%d"),
                     "deadline_date": ss_date.strftime("%Y-%m-%d"),
                     "leadtime": int(leadtime),
-                    "status": "Öneri" if supplier_id != 'Bilinmiyor' else "HATA: Tedarikçi Yok"
+                    "status": status
                 })
                 
                 # IMPORTANT: Since we 'ordered' to fix SS, should we conceptually increase stock for subsequent months?

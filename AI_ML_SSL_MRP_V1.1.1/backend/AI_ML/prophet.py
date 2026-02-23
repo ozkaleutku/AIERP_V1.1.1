@@ -2,11 +2,6 @@ import pandas as pd
 from prophet import Prophet
 import logging
 from datetime import datetime
-import sys
-import os
-
-# Add backend root to sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.database.db_helper import run_query, run_command, run_command_batch
 from backend.logger import get_logger

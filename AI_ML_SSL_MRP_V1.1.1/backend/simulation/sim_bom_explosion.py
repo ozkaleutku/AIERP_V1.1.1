@@ -1,13 +1,26 @@
 from datetime import date, datetime, timedelta
+import threading
 from backend.database.db_helper import run_query, run_command
 from backend.logger import get_logger
 
 logger = get_logger(__name__)
 
 # Thread-local storage for tracking current order context
-_current_order_id = None
-_missing_suppliers = set()  # Track items without suppliers during process_demand
-_current_order_consumption = {} # Cache for partial consumption
+_thread_local = threading.local()
+
+def _get_current_order_id():
+    """Returns the current order ID from thread-local storage, or None."""
+    return getattr(_thread_local, '_current_order_id', None)
+
+def _get_missing_suppliers():
+    """Returns the missing suppliers set from thread-local storage."""
+    if not hasattr(_thread_local, '_missing_suppliers'):
+        _thread_local._missing_suppliers = set()
+    return _thread_local._missing_suppliers
+
+def _get_current_order_consumption():
+    """Returns the current order consumption cache from thread-local storage."""
+    return getattr(_thread_local, '_current_order_consumption', {})
 
 def set_current_order_id(order_id):
     """
@@ -15,10 +28,9 @@ def set_current_order_id(order_id):
     Must be called before process_demand.
     Pre-fetches consumption data to avoid repeated DB queries.
     """
-    global _current_order_id, _missing_suppliers, _current_order_consumption
-    _current_order_id = order_id
-    _missing_suppliers = set()  # Reset for new order
-    _current_order_consumption = {}
+    _thread_local._current_order_id = order_id
+    _thread_local._missing_suppliers = set()
+    _thread_local._current_order_consumption = {}
 
     # Pre-fetch all consumption for this order
     try:
@@ -26,7 +38,7 @@ def set_current_order_id(order_id):
         df = run_query(sql, (order_id,))
         if not df.empty:
             for _, row in df.iterrows():
-                _current_order_consumption[str(row['item_id'])] = float(row['amount'])
+                _thread_local._current_order_consumption[str(row['item_id'])] = float(row['amount'])
     except Exception as e:
         logger.error(f"Error serving consumption cache for order {order_id}: {e}")
 
@@ -34,17 +46,19 @@ def clear_current_order_id():
     """
     Clears the current order ID and consumption cache after processing is complete.
     """
-    global _current_order_id, _current_order_consumption
-    _current_order_id = None
-    _current_order_consumption = {}
+    if hasattr(_thread_local, '_current_order_id'):
+        del _thread_local._current_order_id
+    if hasattr(_thread_local, '_current_order_consumption'):
+        del _thread_local._current_order_consumption
+    if hasattr(_thread_local, '_missing_suppliers'):
+        del _thread_local._missing_suppliers
 
 def get_missing_suppliers():
     """
     Returns the list of items that have no supplier defined.
     Should be called after process_demand completes.
     """
-    global _missing_suppliers
-    return list(_missing_suppliers)
+    return list(_get_missing_suppliers())
 
 def check_supplier_exists(item_id):
     """
@@ -106,12 +120,12 @@ def update_sim_stock(item_id, delta, due_date=None):
     """, (delta, item_id))
     
     # Record the effect for this order (for reversal on delete)
-    global _current_order_id
-    if _current_order_id is not None:
+    current_order_id = _get_current_order_id()
+    if current_order_id is not None:
         run_command("""
         INSERT INTO sim_order_effects (order_id, item_id, amount_changed, due_date)
         VALUES (%s, %s, %s, %s)
-        """, (_current_order_id, item_id, delta, due_date))
+        """, (current_order_id, item_id, delta, due_date))
 
 def reverse_order_effects(order_id):
     """
@@ -159,9 +173,12 @@ def process_demand(item_id, qty, due_date, production_time_days=0, visited=None)
     Note: set_current_order_id() must be called before this function
     to enable effect tracking for the order.
     """
+    qty = float(qty)
+    
     # Cycle Detection
     if visited is None:
         visited = set()
+
     
     if item_id in visited:
         logger.warning(f"CRITICAL WARNING: Circular BOM dependency detected for item {item_id}. Skipping to prevent infinite loop.")
@@ -170,74 +187,76 @@ def process_demand(item_id, qty, due_date, production_time_days=0, visited=None)
     # Add current item to visited path
     visited.add(item_id)
     
-    else:
+    try:
         due_date_obj = due_date
-    
-    # --- PARTIAL CONSUMPTION LOGIC START (OPTIMIZED) ---
-    # Check if we have already consumed materials for this specific order & item using CACHE.
-    global _current_order_id, _current_order_consumption
-    
-    if _current_order_id is not None:
-        # Check cache instead of DB
-        consumed_amount = _current_order_consumption.get(str(item_id), 0.0)
         
-        if consumed_amount > 0:
-            # Effective needed is Original Need - Already Consumed
-            effective_qty = qty - consumed_amount
+        # --- PARTIAL CONSUMPTION LOGIC START (OPTIMIZED) ---
+        # Check if we have already consumed materials for this specific order & item using CACHE.
+        current_order_id = _get_current_order_id()
+        current_order_consumption = _get_current_order_consumption()
+        
+        if current_order_id is not None:
+            # Check cache instead of DB
+            consumed_amount = current_order_consumption.get(str(item_id), 0.0)
             
-            if effective_qty <= 0:
-                # We have already consumed enough of this item for this order.
-                # No need to deduct from Sim Inventory or Explode BOM further.
-                logger.info(f"Order {_current_order_id}: Item {item_id} fully pre-consumed. Skipping.")
-                return
-            else:
-                # We still need some more.
-                qty = effective_qty
-    # --- PARTIAL CONSUMPTION LOGIC END ---
+            if consumed_amount > 0:
+                # Effective needed is Original Need - Already Consumed
+                effective_qty = qty - consumed_amount
+                
+                if effective_qty <= 0:
+                    # We have already consumed enough of this item for this order.
+                    # No need to deduct from Sim Inventory or Explode BOM further.
+                    logger.info(f"Order {_get_current_order_id()}: Item {item_id} fully pre-consumed. Skipping.")
+                    return
+                else:
+                    # We still need some more.
+                    qty = effective_qty
+        # --- PARTIAL CONSUMPTION LOGIC END ---
 
-    current_stock = check_sim_stock(item_id)
-    
-    # 1. Consume what we have - pass due_date for tracking
-    consume_amount = qty 
-    update_sim_stock(item_id, -consume_amount, due_date_obj)
-    
-    # Check if we went negative (Deficit)
-    # If we are negative, it means we need to produce or buy 'deficit_amount'
-    # Logic: 
-    # If I had 10, needed 15. Stock becomes -5.
-    # So I need to replenish 5.
-    
-    # Netting logic: Only explode the missing part
-    if current_stock < qty:
-        # Calculate how much we actually need to produce/buy
-        if current_stock > 0:
-            needed_to_produce = qty - current_stock
-        else:
-            needed_to_produce = qty
-            
-        if needed_to_produce > 0:
-            bom_items = get_bom(item_id)
-            if bom_items:
-                # It has a BOM, so we must produce it using children
-                # Calculate start date for children - they must be ready BEFORE production starts
-                # production_time_days comes from customer order for top-level item
-                # For recursive calls (child items), we pass 0 since sub-production is immediate
-                
-                # Child items must be ready BY production start date
-                child_due_date = due_date_obj - timedelta(days=production_time_days)
-                
-                for child in bom_items:
-                    child_qty_needed = needed_to_produce * float(child['amount'])
-                    # Pass 0 for production_time_days in recursive calls
-                    # because child items don't have their own production time from order
-                    process_demand(child['child_id'], child_qty_needed, child_due_date, 0, visited)
+        current_stock = check_sim_stock(item_id)
+        
+        # 1. Consume what we have - pass due_date for tracking
+        consume_amount = qty 
+        update_sim_stock(item_id, -consume_amount, due_date_obj)
+        
+        # Check if we went negative (Deficit)
+        # If we are negative, it means we need to produce or buy 'deficit_amount'
+        # Logic: 
+        # If I had 10, needed 15. Stock becomes -5.
+        # So I need to replenish 5.
+        
+        # Netting logic: Only explode the missing part
+        if current_stock < qty:
+            # Calculate how much we actually need to produce/buy
+            if current_stock > 0:
+                needed_to_produce = qty - current_stock
             else:
-                # No BOM -> It's a Raw Material (or Buy item).
-                # Check if this item has a supplier defined
-                global _missing_suppliers
-                if not check_supplier_exists(item_id):
-                    _missing_suppliers.add(item_id)
-                # We just leave the stock negative. The "Order Map" page will scan for negative stocks.
-    
-    # Backtrack: Remove current item from visited path
-    visited.remove(item_id)
+                needed_to_produce = qty
+                
+            if needed_to_produce > 0:
+                bom_items = get_bom(item_id)
+                if bom_items:
+                    # It has a BOM, so we must produce it using children
+                    # Calculate start date for children - they must be ready BEFORE production starts
+                    # production_time_days comes from customer order for top-level item
+                    # For recursive calls (child items), we pass 0 since sub-production is immediate
+                    
+                    # Child items must be ready BY production start date
+                    child_due_date = due_date_obj - timedelta(days=production_time_days)
+                    
+                    for child in bom_items:
+                        child_qty_needed = needed_to_produce * float(child['amount'])
+                        # Pass 0 for production_time_days in recursive calls
+                        # because child items don't have their own production time from order
+                        process_demand(child['child_id'], child_qty_needed, child_due_date, 0, visited)
+                else:
+                    # No BOM -> It's a Raw Material (or Buy item).
+                    # Check if this item has a supplier defined
+                    # No BOM -> It's a Raw Material (or Buy item).
+                    # Check if this item has a supplier defined
+                    if not check_supplier_exists(item_id):
+                        _get_missing_suppliers().add(item_id)
+                    # We just leave the stock negative. The "Order Map" page will scan for negative stocks.
+    finally:
+        # Backtrack: Remove current item from visited path
+        visited.remove(item_id)

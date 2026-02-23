@@ -2,6 +2,24 @@
 
 Bu belge, AI tabanlı MRP sisteminin veritabanı yapısını, tablolar arası ilişkileri ve otomasyonu sağlayan trigger mekanizmalarını detaylandırır.
 
+---
+
+## 📋 ENUM Tipleri
+
+Sistemde kullanılan tüm PostgreSQL ENUM tipleri:
+
+| ENUM Adı | Değerler | Kullanıldığı Yer |
+| :--- | :--- | :--- |
+| `item_type_enum` | `mamül`, `yarı_mamül`, `hammadde` | `item.item_type` |
+| `quantity_type_enum` | `gram`, `adet`, `litre` | `item.item_quantity_type` |
+| `movement_purpose_enum` | `üretime_giden`, `satış_çıkışı`, `giriş`, `çıkış` | `stock_movement.purpose` |
+| `purchase_purpose_enum` | `emniyet_stoku_için`, `acil_sipariş`, `normal_sipariş` | `purchase.purpose` |
+| `activity_status_enum` | `Aktif`, `Pasif` | `item`, `bom`, `supplier_item` |
+| `customer_order_status_enum` | `Bekleniyor`, `Üretimde`, `Hazır`, `Sevk Edildi` | `customer_orders.status` |
+| `level_status_enum` | `Level 0` ~ `Level 9` | `calculated_full_ss_ai_temp.status` |
+
+---
+
 ## 📊 Varlık İlişki Diyagramı (ERD)
 
 Aşağıdaki diyagram, sistemdeki **TÜM** tabloların sütun ve veri tiplerini kapsamlı bir şekilde gösterir.
@@ -37,37 +55,37 @@ erDiagram
     
     ITEM {
         varchar item_id PK
-        enum item_type "mamül, yarı_mamül, hammadde"
-        enum item_quantity_type "adet, gram, litre"
-        enum activity_status "Aktif, Pasif"
-        decimal demand_avg
-        decimal demand_deviation
+        item_type_enum item_type "mamul, yari_mamul, hammadde"
+        quantity_type_enum item_quantity_type "adet, gram, litre"
+        activity_status_enum activity_status "Aktif, Pasif"
+        decimal demand_avg "Trigger ile hesaplanir"
+        decimal demand_deviation "Trigger ile hesaplanir"
     }
 
     SUPPLIER_ITEM {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         varchar supplier_id PK
-        decimal calculated_leadtime_avg
-        decimal calculated_leadtime_deviation
+        decimal calculated_leadtime_avg "Trigger ile hesaplanir"
+        decimal calculated_leadtime_deviation "Trigger ile hesaplanir"
         decimal given_leadtime
         decimal given_leadtime_deviation
         decimal lot_size
         decimal min_size
         decimal max_size
-        boolean calculated
-        enum activity_status
+        boolean calculated "true ise sistem degerlerini kullan"
+        activity_status_enum activity_status
     }
 
     BOM {
-        varchar parent_id PK, FK
-        varchar child_id PK, FK
+        varchar parent_id PK_FK
+        varchar child_id PK_FK
         decimal amount
-        enum activity_status
+        activity_status_enum activity_status
     }
 
     ACTIVE_INVENTORY {
-        varchar item_id PK, FK
-        decimal current_stock
+        varchar item_id PK_FK
+        decimal current_stock "Trigger ile guncellenir"
     }
 
     %%-------------------------------------------------------------------------
@@ -82,21 +100,22 @@ erDiagram
         date purchase_date
         date expected_coming_date
         date actual_coming_date
-        numeric delay_day "Generated"
-        varchar status "Generated"
-        enum purpose "emniyet_stoku, acil, normal"
+        numeric delay_day "Generated: actual - expected"
+        varchar status "Generated: Beklemede veya Geldi"
+        purchase_purpose_enum purpose "emniyet_stoku_icin, acil_siparis, normal_siparis"
     }
 
     STOCK_MOVEMENT {
         serial id PK
         varchar item_id FK
         decimal amount
-        enum purpose "giriş, çıkış, üretim, satış"
+        movement_purpose_enum purpose "uretime_giden, satis_cikisi, giris, cikis"
         date date
+        integer order_id "Opsiyonel - musteri siparis iliskilendirme"
     }
 
     START_INVENTORIES {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal amount
     }
@@ -117,7 +136,7 @@ erDiagram
         date expected_delivery_date
         date delivery_date
         int production_time_days
-        enum status "Bekleniyor, Üretimde, Sevk"
+        customer_order_status_enum status "Bekleniyor, Uretimde, Hazir, Sevk Edildi"
     }
 
     %%-------------------------------------------------------------------------
@@ -125,55 +144,56 @@ erDiagram
     %%-------------------------------------------------------------------------
 
     SS_KINGS_FORMULA {
-        varchar item_id PK, FK
-        varchar supplier_id PK, FK
+        varchar item_id PK_FK
+        varchar supplier_id PK_FK
         decimal demand_avg
         decimal leadtime_avg
         decimal demand_deviation
         decimal leadtime_deviation
         numeric z_score
-        numeric result_king "Generated"
-        enum activity_status
+        numeric result_king "Generated Column"
+        activity_status_enum activity_status
     }
 
     PROPHET_TABLE_HISTORY {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal amount
     }
 
     PROPHET_TABLE_TEMPORARY {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal amount
     }
 
     SS_AI_HISTORY {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal amount
     }
 
     SS_AI_TEMPORARY {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal amount
     }
 
     FINAL_SAFETY_STOCK {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
         decimal safety_stock
-        enum item_quantity_type
+        quantity_type_enum item_quantity_type
     }
 
     CALCULATED_FULL_SS_AI_TEMP {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         date date PK
-        varchar status PK "Level Bilgisi"
+        level_status_enum status PK "Level 0 - Level 9"
         decimal amount
-        enum item_type
-        enum item_quantity_type
+        item_type_enum item_type
+        quantity_type_enum item_quantity_type
+        decimal formula_result
     }
 
     %%-------------------------------------------------------------------------
@@ -181,7 +201,7 @@ erDiagram
     %%-------------------------------------------------------------------------
 
     SIP_HARITA_ACTIVE_INVENTORY {
-        varchar item_id PK, FK
+        varchar item_id PK_FK
         decimal current_stock
     }
 
@@ -209,44 +229,87 @@ erDiagram
 
 ### 1. Ana Veri Tabloları (Master Data)
 
-- **`ITEM`**: Tüm stok kartlarının tanımlandığı ana tablodur. `demand_avg` ve `demand_deviation` triggerlar ile sürekli güncel tutulur.
-- **`SUPPLIER_ITEM`**: Malzeme-Tedarikçi ilişkisini tanımlar. `calculated_leadtime` alanları sistem tarafından performans geçmişine göre doldurulur.
-- **`BOM`**: Ürün reçetelerini (ağaç yapısı) tutar.
-- **`ACTIVE_INVENTORY`**: Depodaki anlık, fiziksel stok miktarını tutar.
+| Tablo | Açıklama | Önemli Notlar |
+| :--- | :--- | :--- |
+| **`item`** | Tüm stok kartlarının tanımlandığı ana tablodur. | `demand_avg` ve `demand_deviation` triggerlar ile sürekli güncel tutulur. |
+| **`supplier_item`** | Malzeme-Tedarikçi ilişkisini tanımlar. | `calculated` alanı `true` ise sistem hesaplı leadtime kullanır, `false` ise elle girilen değer. |
+| **`bom`** | Ürün reçetelerini (ağaç yapısı) tutar. | Parent-Child ilişkisi composite PK ile tanımlanır. |
+| **`active_inventory`** | Depodaki anlık, fiziksel stok miktarını tutar. | `stock_movement` triggerı ile otomatik güncellenir. |
 
 ### 2. Hareket Tabloları (Transaction Data)
 
-- **`PURCHASE`**: Tedarikçilere verilen siparişlerdir. `delay_day` sütunu, `actual_coming_date` girildiği an otomatik hesaplanır.
-- **`STOCK_MOVEMENT`**: Depodaki tüm giriş/çıkış hareketleridir.
-- **`CUSTOMER_ORDERS`**: Müşterilerden alınan satış siparişleridir. "Sevk Edildi" veya "Hazır" olduğunda ilgili tüketim kayıtları otomatik temizlenir.
-- **`START_INVENTORIES`**: Her ay başında sistemin otomatik aldığı stok fotoğraflarıdır (Snapshot).
-- **`SALES_OUT_HISTORY`**: Satış amacıyla çıkış yapılan stok hareketlerinin kopyasıdır, talep tahminlemede kullanılır.
-
+| Tablo | Açıklama | Önemli Notlar |
+| :--- | :--- | :--- |
+| **`purchase`** | Tedarikçilere verilen siparişlerdir. | `delay_day`, `status` sütunları `GENERATED ALWAYS` olarak otomatik hesaplanır. `delay_day = actual_coming_date - expected_coming_date`. |
+| **`stock_movement`** | Depodaki tüm giriş/çıkış hareketleridir. | 4 amaç tipi: `giriş` (stok artırır), `çıkış` (stok düşürür), `üretime_giden` (stok düşürür), `satış_çıkışı` (stok düşürür + satış kaydı). |
+| **`customer_orders`** | Müşterilerden alınan satış siparişleridir. | 4 durum: `Bekleniyor` → `Üretimde` → `Hazır` → `Sevk Edildi`. Sevk'te otomatik `satış_çıkışı` kaydı oluşur. |
+| **`start_inventories`** | Her ay başında sistemin otomatik aldığı stok fotoğraflarıdır (Snapshot). | Trigger ile `stock_movement` INSERT'inde ay başı kaydı yoksa otomatik oluşturulur. |
+| **`sales_out_history`** | Satış amacıyla çıkış yapılan stok hareketlerinin kopyasıdır. | Talep tahminlemede (Prophet) kullanılır. Trigger ile `satış_çıkışı` hareketinden otomatik oluşturulur. |
 
 ### 3. Analitik ve Yapay Zeka Tabloları
 
-- **`SS_KINGS_FORMULA`**: Klasik istatistiksel yöntemle (King's Formula) hesaplanan güvenlik stoğu önerileridir. `result_king` sütunu veritabanı tarafından otomatik hesaplanır.
-- **`PROPHET_TABLE_HISTORY`**: Facebook Prophet algoritmasının kesinleşmiş geçmiş zaman serisi tahmin verileridir.
-- **`PROPHET_TABLE_TEMPORARY`**: Hesaplama sırasında üretilen geçici Prophet tahminleridir (Taslak).
-- **`SS_AI_HISTORY`**: LightGBM algoritmasının ürettiği geçmişe dönük yapay zeka güvenlik stoğu tahminleridir.
-- **`SS_AI_TEMPORARY`**: LightGBM algoritmasının hesaplama anında ürettiği geçici güvenlik stoğu verileridir.
-- **`CALCULATED_FULL_SS_AI_TEMP`**: BOM patlatma işlemi sırasında, her seviyedeki (`Level 0` - `Level N`) ihtiyacı hesaplamak için kullanılan geçici çalışma tablosudur.
-- **`FINAL_SAFETY_STOCK`**: Tüm algoritmalar çalıştıktan sonra yöneticinin önüne gelen nihai güvenlik stoğu rapor tablosudur.
+| Tablo | Açıklama | Akış |
+| :--- | :--- | :--- |
+| **`ss_kings_formula`** | Klasik istatistiksel yöntemle (King's Formula) hesaplanan güvenlik stoğu. | `result_king = z_score × √(LT × σ_d² + d² × σ_LT²)` — Bu bir **Generated Column**'dur. |
+| **`prophet_table_temporary`** | Prophet tahmin taslağı (hesaplama sonrası). | Kullanıcı onaylayana kadar burada kalır. |
+| **`prophet_table_history`** | Onaylanmış Prophet tahmin verisi. | `/forecast/approve` çağrıldığında temporary → history'ye kopyalanır. |
+| **`ss_ai_temporary`** | LightGBM güvenlik stoğu taslağı. | Hesaplama sonrası geçici olarak burada tutulur. |
+| **`ss_ai_history`** | Onaylanmış LightGBM güvenlik stoğu. | Onaylandığında temporary → history'ye taşınır. |
+| **`calculated_full_ss_ai_temp`** | BOM patlatma sırasında her seviyedeki ihtiyacı hesaplayan çalışma tablosu. | `status` sütunu `Level 0` - `Level N` bilgisini taşır. `formula_result` sütunu King's Formula sonucunu içerir. |
+| **`final_safety_stock`** | Tüm algoritmalar çalıştıktan sonra yöneticinin onayladığı nihai güvenlik stoğu. | Karşılaştırma ekranından AI/Formül/Manuel seçimi yapılarak buraya kaydedilir. |
 
 ### 4. Simülasyon Tabloları
 
-- **`SIP_HARITA_ACTIVE_INVENTORY`**: Müşteri siparişlerinin "Ne olurdu?" senaryolarını denemek için kullanılan sanal stok tablosudur. Gerçek stoku bozmadan simülasyon yapmayı sağlar.
-- **`SIM_ORDER_EFFECTS`**: Her bir müşteri siparişinin simülasyon stoğu üzerindeki etkisini (rezerve ettiği miktar vb.) takip eder.
-- **`ORDER_MATERIAL_CONSUMPTION`**: Bir sipariş için üretime verilen malzemeleri takip eder. Simülasyonun mükerrer hesap yapmasını engeller.
+| Tablo | Açıklama | Önemli Notlar |
+| :--- | :--- | :--- |
+| **`sip_harita_active_inventory`** | Sanal stok tablosu — "Ne olurdu?" senaryoları için. | Gerçek stoku bozmadan müşteri siparişlerinin etkisini simüle eder. `stock_movement` triggerı ile senkronize edilir. |
+| **`sim_order_effects`** | Her müşteri siparişinin simülasyon stoğu üzerindeki etkisi. | Sipariş silindiğinde veya güncellendiğinde bu tablo üzerinden geri alma (reversal) yapılır. |
+| **`order_material_consumption`** | Bir sipariş için üretime verilen malzeme kayıtları. | `üretime_giden` hareketi + `order_id` ile ilişkilendirildiğinde bu tabloya yazılır. Mükerrer hesabı engeller. |
 
 ---
 
-## ⚡ Otomasyon (Triggers)
+## ⚡ Trigger Mekanizmaları (Detaylı)
 
-Bu tablolar arasındaki veri akışı **PostgreSQL Triggerları** ile sağlanır:
-1.  **Stok Güncelleme:** `STOCK_MOVEMENT` -> `ACTIVE_INVENTORY`
-2.  **Talep İstatistiği:** `PURCHASE` / `SALES` -> `ITEM` (Ortalama Talep)
-3.  **Performans Analizi:** `PURCHASE` -> `SUPPLIER_ITEM` (Lead Time)
-4.  **Risk Analizi:** `SUPPLIER_ITEM` -> `SS_KINGS_FORMULA`
-5.  **Aylık Arşiv:** `STOCK_MOVEMENT` -> `START_INVENTORIES`
-6.  **Simülasyon Senk:** `ACTIVE_INVENTORY` -> `SIP_HARITA_ACTIVE_INVENTORY` (Gerçek stok değişince simülasyon başlangıcı da güncellenir)
+Aşağıdaki tablo, sistemdeki tüm triggerları, hangi tabloda çalıştıklarını, ne zaman tetiklendiklerini ve ne yaptıklarını detaylı olarak açıklar.
+
+### Stok Yönetimi Triggerları
+
+| # | Trigger | Tetikleyen Tablo | Olay | Açıklama |
+| :---: | :--- | :--- | :--- | :--- |
+| 1 | **Stok Güncelleme** | `stock_movement` | INSERT / DELETE | **INSERT:** `giriş` → stok artar, diğer amaçlar → stok azalır. **DELETE:** Eski hareketin etkisi tersine çevrilir (giriş silindiyse stok düşer, çıkış silindiyse stok artar). |
+| 2 | **Simülasyon Stok Senkronizasyonu** | `stock_movement` | INSERT / DELETE | Gerçek stok değiştiğinde `sip_harita_active_inventory` tablosu da aynı miktarda güncellenir. |
+| 3 | **Satış Kaydı Otomasyonu** | `stock_movement` | INSERT / UPDATE / DELETE | `purpose = 'satış_çıkışı'` olan hareketler otomatik olarak `sales_out_history` tablosuna kopyalanır. UPDATE'de eski kayıt silinip yenisi eklenir. DELETE'de ilgili kayıt silinir. |
+| 4 | **Aylık Stok Snapshot** | `stock_movement` | INSERT | Eğer hareketin tarihindeki ay başı için henüz `start_inventories` kaydı yoksa, o anki `current_stock` değeri snapshot olarak kaydedilir. |
+
+### İstatistik ve Performans Triggerları
+
+| # | Trigger | Tetikleyen Tablo | Olay | Açıklama |
+| :---: | :--- | :--- | :--- | :--- |
+| 5 | **Talep İstatistiği** | `sales_out_history` | INSERT / UPDATE / DELETE | `item` tablosundaki `demand_avg` ve `demand_deviation` değerleri, o ürünün tüm satış geçmişi üzerinden yeniden hesaplanır (ortalama ve standart sapma). |
+| 6 | **Tedarikçi Performansı** | `purchase` | INSERT / UPDATE / DELETE | `supplier_item` tablosundaki `calculated_leadtime_avg` ve `calculated_leadtime_deviation`, o tedarikçinin tüm tamamlanmış siparişlerinin `delay_day` değerleri üzerinden yeniden hesaplanır. |
+| 7 | **Risk Analizi (King's Formula)** | `supplier_item` | INSERT / UPDATE | `ss_kings_formula` tablosu güncellenir. `calculated = true` ise hesaplanan leadtime, değilse verilen leadtime kullanılır. `item` tablosundaki talep istatistikleri de dahil edilir. |
+
+### Satın Alma Triggerları
+
+| # | Trigger | Tetikleyen Tablo | Olay | Açıklama |
+| :---: | :--- | :--- | :--- | :--- |
+| 8 | **Sipariş Gelişi → Stok** | `purchase` | UPDATE | `actual_coming_date` NULL'dan bir tarihe değiştiğinde → `stock_movement` tablosuna `giriş` kaydı eklenir. Eğer önceden NULL değilken tekrar güncelleniyorsa, eski hareketin etkisi geri alınır. |
+| 9 | **Satın Alma → Simülasyon** | `purchase` | INSERT / UPDATE / DELETE | Yeni sipariş verildiğinde simülasyon stoğuna beklenen miktar eklenir. Sipariş silindiğinde veya güncellendiğinde eski etki geri alınır. |
+
+---
+
+## 🔄 Trigger Geri Alma (Reversal) Mantığı
+
+Sistemdeki triggerlar, **UPDATE ve DELETE** durumlarında eski verinin etkisini önce **GERİ ALIR**, sonra (UPDATE ise) yeni verinin etkisini uygular. Bu yaklaşım veri tutarlılığını garanti eder.
+
+**Örnek — Stok Hareketi UPDATE:**
+1. `OLD.purpose = 'giriş'` → Eski giriş geri alınır: `current_stock -= OLD.amount`
+2. `OLD.purpose = 'çıkış'` → Eski çıkış geri alınır: `current_stock += OLD.amount`
+3. Ardından `NEW` kaydın etkisi normal şekilde uygulanır.
+
+Bu mantık **tüm** ilgili triggerlarda tutarlı olarak uygulanır:
+- `active_inventory` ← stok hareketleri
+- `sip_harita_active_inventory` ← stok hareketleri + satın alma
+- `sales_out_history` ← satış çıkış hareketleri
+- `item.demand_avg/deviation` ← satış geçmişi
+- `supplier_item.calculated_leadtime` ← satın alma performansı

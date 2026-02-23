@@ -1,25 +1,32 @@
 # 📡 API Dokümantasyonu (MRP System V1.1)
 
 Bu belge, sistemin Backend servisi (`http://localhost:8000`) üzerinden sunduğu RESTful API servislerini listeler.
-Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırılmıştır.
+Sistemdeki **tüm** aktif endpointler aşağıda gruplandırılarak detaylandırılmıştır.
 
 ---
 
 ## 🏗️ Veri Modelleri (Data Models)
 
-İstek gövdelerinde (Request Body) kullanılan temel şemalar:
+İstek gövdelerinde (Request Body) kullanılan Pydantic şemaları:
 
-| Model | Açıklama |
-| :--- | :--- |
-| **ProductCreate** | `{ item_id, item_type, item_quantity_type, activity_status }` |
-| **BomCreate** | `{ parent_id, child_id, amount, activity_status }` |
-| **SupplierItemCreate** | `{ item_id, supplier_id, given_leadtime, lot_size, ... }` |
-| **OrderCreate** | `{ item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date }` |
-| **OrderEdit** | `{ id, item_id, supplier_id, amount, purpose, purchase_date, ... }` |
-| **StockMovementCreate** | `{ item_id, amount, purpose, date }` |
-| **CustomerOrderCreate** | `{ customer_name, item_id, amount, order_date, expected_delivery_date, status }` |
-| **SalesRecordCreate** | `{ item_id, amount, date }` |
-| **ForecastUpdate** | `{ item_id, date, amount }` |
+| Model | Alanlar (Fields) | Validasyonlar |
+| :--- | :--- | :--- |
+| **ProductCreate** | `item_id`, `item_type`, `item_quantity_type`, `activity_status` | - |
+| **ProductUpdate** | `item_type`, `item_quantity_type`, `activity_status` | Opsiyonel alanlar |
+| **BomCreate** | `parent_id`, `child_id`, `amount`, `activity_status` | `amount > 0` |
+| **BomUpdate** | `amount`, `activity_status` | `amount > 0`, Opsiyonel |
+| **SupplierItemCreate** | `item_id`, `supplier_id`, `given_leadtime`, `lot_size`, `min_size`, `max_size`, `calculated`, `status` | `given_leadtime > 0`, diğerleri `>= 0` |
+| **SupplierItemUpdate** | `given_leadtime`, `lot_size`, ... (Tüm alanlar opsiyonel) | - |
+| **OrderCreate** | `item_id`, `supplier_id`, `amount`, `purpose`, `purchase_date`, `expected_coming_date` | `amount > 0` |
+| **OrderUpdate** | `id`, `actual_coming_date` | Sipariş karşılama için kullanılır (Receive) |
+| **OrderEdit** | `id`, `item_id`, `amount`, ... | Sipariş düzenleme için, opsiyonel alanlar |
+| **StockMovementCreate** | `item_id`, `amount`, `purpose`, `date`, `order_id` (Opt) | `amount > 0` |
+| **InventoryUpdate** | `item_id`, `amount` | `amount >= 0` (Sayım düzeltme) |
+| **CustomerOrderCreate** | `customer_name`, `item_id`, `amount`, `order_date`, `expected_delivery_date`, `production_time_days`, `status` | - |
+| **CustomerOrderUpdate** | `customer_name`, `amount`, `status`, ... | Opsiyonel |
+| **ForecastUpdate** | `item_id`, `date`, `amount` | `amount >= 0` |
+| **SalesRecordCreate** | `item_id`, `amount`, `date` | `amount > 0` |
+| **ApprovalItem** | `item_id`, `date`, `amount`, `item_quantity_type` | Güvenlik stoğu onayı için |
 
 ---
 
@@ -27,7 +34,7 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/` | API Sağlık Kontrolü. "API is Running" döner. |
+| `GET` | `/` | API Sağlık Kontrolü. "AI-Driven MRP System API is Running (Refactored)" döner. |
 
 ---
 
@@ -35,10 +42,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/products` | Tüm ürünleri listeler. Parametreler: `page`, `limit`, `search`, `item_type`. |
-| `POST` | `/api/products` | Yeni bir stok kartı oluşturur. |
-| `PUT` | `/api/products/{item_id}` | Ürün detaylarını günceller (Örn: Pasife çekme). |
-| `DELETE` | `/api/products/{item_id}` | Ürünü siler. |
+| `GET` | `/api/products` | Tüm ürünleri listeler. <br> **Query Params:** `page` (def: 1), `limit` (def: 50), `search`, `item_type`, `status` |
+| `POST` | `/api/products` | Yeni bir stok kartı oluşturur. <br> **Body:** `ProductCreate` |
+| `PUT` | `/api/products/{item_id}` | Ürün detaylarını günceller. <br> **Body:** `ProductUpdate` |
+| `DELETE` | `/api/products/{item_id}` | Ürünü siler (Hard Delete). |
 
 ---
 
@@ -46,10 +53,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/bom` | Tüm BOM (Parent-Child) ilişkilerini listeler. |
-| `POST` | `/api/bom` | Bir ürüne alt bileşen ekler. |
-| `PUT` | `/api/bom/{p_id}/{c_id}` | Reçete miktarını günceller. |
-| `DELETE` | `/api/bom/{p_id}/{c_id}` | Reçete bileşenini siler. |
+| `GET` | `/api/bom` | Tüm BOM (Parent-Child) ilişkilerini listeler. Düz liste döner. |
+| `POST` | `/api/bom` | Bir ürüne alt bileşen ekler. <br> **Body:** `BomCreate` |
+| `PUT` | `/api/bom/{parent_id}/{child_id}` | Reçete miktarını veya durumunu günceller. <br> **Body:** `BomUpdate` |
+| `DELETE` | `/api/bom/{parent_id}/{child_id}` | Reçete bileşenini siler (Hard Delete). |
 
 ---
 
@@ -57,9 +64,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/suppliers` | Hangi malzemenin hangi tedarikçiden alındığını listeler. |
-| `POST` | `/api/suppliers` | Bir malzemeye tedarikçi tanımlar (Lead Time verisi ile). |
-| `PUT` | `/api/suppliers/update` | Tedarikçi parametrelerini (Lead Time, Lot Size) günceller. |
+| `GET` | `/api/suppliers` | Malzeme-Tedarikçi ilişkilerini listeler. |
+| `POST` | `/api/suppliers` | Bir malzemeye tedarikçi tanımlar. <br> **Body:** `SupplierItemCreate` |
+| `PUT` | `/api/suppliers/update` | Tedarikçi parametrelerini günceller. <br> **Body:** `SupplierItemUpdate` |
+| `DELETE` | `/api/suppliers/{item_id}/{supplier_id}` | İlişkiyi pasife çeker (Soft Delete). |
 
 ---
 
@@ -67,10 +75,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/inventory` | Anlık depo mevcudunu listeler (`active_inventory`). |
-| `PUT` | `/api/inventory/update` | Stok miktarını manuel düzeltir (Sayım farkı vb.). |
-| `GET` | `/api/stock-movements` | Tüm giriş/çıkış hareket geçmişini listeler. |
-| `POST` | `/api/stock-movements` | Manuel stok hareketi (Giriş/Çıkış) ekler. |
+| `GET` | `/api/inventory` | Anlık depo mevcudunu listeler (`active_inventory`). <br> **Query Params:** `page`, `limit`, `search` |
+| `PUT` | `/api/inventory/update` | Stok miktarını manuel düzeltir (Sayım farkı vb.). <br> **Body:** `InventoryUpdate` |
+| `GET` | `/api/stock-movements` | Tüm giriş/çıkış hareket geçmişini listeler. Limit 100 ile sınırlıdır. |
+| `POST` | `/api/stock-movements` | Manuel stok hareketi (Giriş/Çıkış) ekler. <br> **Body:** `StockMovementCreate` |
 
 ---
 
@@ -79,10 +87,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
 | `GET` | `/api/orders` | Tedarikçilere verilen siparişleri listeler. |
-| `POST` | `/api/orders` | Yeni satın alma siparişi oluşturur. |
-| `PUT` | `/api/orders/receive` | **Kritik:** Siparişin depoya gelişini onaylar (`actual_coming_date`). Gecikme hesaplanır. |
-| `PUT` | `/api/orders/update` | Mevcut bir siparişin bilgilerini (Tarih, Miktar) düzenler. |
-| `DELETE` | `/api/orders/{id}` | Siparişi iptal eder. |
+| `POST` | `/api/orders` | Yeni satın alma siparişi oluşturur. <br> **Body:** `OrderCreate` |
+| `PUT` | `/api/orders/receive` | **Kritik:** Siparişin depoya gelişini onaylar. Stok artışı tetikler. <br> **Body:** `OrderUpdate` (`id`, `actual_coming_date`) |
+| `PUT` | `/api/orders/update` | Mevcut bir siparişin bilgilerini düzenler. <br> **Body:** `OrderEdit` |
+| `DELETE` | `/api/orders/{id}` | Siparişi iptal eder (Hard Delete). |
 
 ---
 
@@ -90,9 +98,9 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/customer-orders` | Müşteri siparişlerini listeler. |
-| `POST` | `/api/customer-orders` | Sipariş oluşturur ve **Simülasyonu Tetikler**. Eksik malzemeyi hesaplar. |
-| `PUT` | `/api/customer-orders/{id}` | Sipariş durumunu günceller (`Sevk Edildi` olunca stoktan düşer). |
+| `GET` | `/api/customer-orders` | Müşteri siparişlerini listeler. Simülasyon verileri ile zenginleştirilmiştir (`shortage_items` vb.). |
+| `POST` | `/api/customer-orders` | Sipariş oluşturur ve **Simülasyonu Tetikler**. <br> **Body:** `CustomerOrderCreate` |
+| `PUT` | `/api/customer-orders/{id}` | Sipariş durumunu veya miktarını günceller. <br> **Body:** `CustomerOrderUpdate` |
 | `DELETE` | `/api/customer-orders/{id}` | Siparişi siler ve simülasyon etkilerini geri alır. |
 
 ---
@@ -101,10 +109,10 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `POST` | `/api/forecast/calculate` | Gelecek dönem (Prophet) talep tahminini çalıştırır. |
-| `GET` | `/api/forecast/temporary` | Tahmin sonuçlarını grafik için çeker. |
-| `PUT` | `/api/forecast/update` | AI tahminini manuel olarak (elle) düzeltir. |
-| `POST` | `/api/forecast/approve` | Tahmin sonuçlarını onaylar ve geçmiş kayıtlara işler. |
+| `POST` | `/api/forecast/calculate` | Gelecek dönem (Prophet) talep tahminini çalıştırır. (Gelecek yılın 12 ayı) |
+| `GET` | `/api/forecast/temporary` | Tahmin sonuçlarını (`prophet_table_temporary`) çeker. |
+| `PUT` | `/api/forecast/update` | AI tahminini manuel olarak (elle) düzeltir. <br> **Body:** `ForecastUpdate` |
+| `POST` | `/api/forecast/approve` | Tahmin sonuçlarını onaylar ve `history` tablosuna aktarır. |
 
 ---
 
@@ -112,22 +120,22 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/safety-stock` | Kesinleşmiş güvenlik stoğu raporunu çeker. |
-| `GET` | `/api/safety-stock/temporary` | AI tarafından hesaplanan ama henüz onaylanmamış taslak önerileri çeker. |
+| `GET` | `/api/safety-stock` | Kesinleşmiş güvenlik stoğu raporunu (`final_safety_stock`) çeker. Stok farkını da hesaplar. |
+| `GET` | `/api/safety-stock/temporary` | AI (LightGBM) ve Formül (King's) sonuçlarını karşılaştırmalı olarak çeker. |
 | `POST` | `/api/safety-stock/calculate` | **Tetikleyici:** Prophet ve LightGBM modellerini çalıştırır, BOM patlatır ve öneri üretir. |
-| `POST` | `/api/safety-stock/approve` | Kullanıcının seçtiği AI önerilerini onaylar ve sisteme işler. |
+| `POST` | `/api/safety-stock/approve` | Kullanıcının seçtiği AI önerilerini onaylar. <br> **Body:** `List[ApprovalItem]` |
 
 ---
 
 ## 📊 9. Satış Yönetimi (Sales - Manual)
 
-*Otomatik sistemde satışlar stok hareketinden düşer. Burası manuel müdahale içindir.*
+*Not: `satış_çıkışı` tipindeki stok hareketleri otomatik olarak buraya işlenir. Bu endpointler manuel düzeltmeler içindir.*
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/sales` | Satış kayıtlarını listeler. |
-| `POST` | `/api/sales` | Yeni satış kaydı oluşturur. |
-| `PUT` | `/api/sales/{id}` | Satışı günceller. |
+| `GET` | `/api/sales` | Satış kayıtlarını (`sales_out_history`) listeler. |
+| `POST` | `/api/sales` | Yeni satış kaydı oluşturur. <br> **Body:** `SalesRecordCreate` |
+| `PUT` | `/api/sales/{id}` | Satışı günceller. <br> **Body:** `SalesRecordUpdate` |
 | `DELETE` | `/api/sales/{id}` | Satışı siler. |
 
 ---
@@ -136,5 +144,5 @@ Sistemdeki **tüm** aktif endpointler (toplam 41 adet) aşağıda detaylandırı
 
 | Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/api/simulation/suggestions` | Mevcut siparişleri yetiştirmek için gereken eksik hammadde listesini döner. |
-| `POST` | `/api/simulation/reset` | Simülasyon stoklarını gerçek stoklarla senkronize eder (Sıfırlar). |
+| `GET` | `/api/simulation/suggestions` | Mevcut siparişleri yetiştirmek için gereken eksik hammadde listesini (`sim_manager.get_missing_suppliers` dahil) döner. |
+| `POST` | `/api/simulation/reset` | Simülasyon stoklarını gerçek stoklarla senkronize eder (Sıfırlar). Tüm siparişler yeniden simüle edilir. |

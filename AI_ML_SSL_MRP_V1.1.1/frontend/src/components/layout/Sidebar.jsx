@@ -1,5 +1,6 @@
 import { Home, ShoppingCart, ArrowRightLeft, TrendingUp, Package, Users, Layers, ShieldCheck, PackageCheck, History, Map } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 
 export const SIDEBAR_ITEMS = [
     { name: "Anasayfa", icon: Home, path: "/", description: "Genel bakış ve sistem özeti." },
@@ -19,8 +20,25 @@ export const SIDEBAR_ITEMS = [
 const Sidebar = () => {
     const location = useLocation();
 
+    // Obfuscated Signature
+    const [sysInfo] = useState(() => ({
+        brand: atob("T3B0aVN0b2NrIEFJ"),
+        mail: atob("dXRrdW96a2FsZUBnbWFpbC5jb20=")
+    }));
+
+    // Anti-Tamper Check
+    useEffect(() => {
+        const sysCheck = setInterval(() => {
+            const sigElement = document.getElementById("sys-signature");
+            if (!sigElement || !sigElement.innerText.includes(atob("dXRrdW96a2FsZUBnbWFpbC5jb20="))) {
+                document.body.innerHTML = "<div style='display:flex;height:100vh;width:100vw;align-items:center;justify-content:center;background:#111827;color:#ef4444;font-family:sans-serif;font-size:24px;font-weight:bold;'>Sistem İhlali: Lisans İmzası Kaldırılamaz!</div>";
+            }
+        }, 3000);
+        return () => clearInterval(sysCheck);
+    }, []);
+
     return (
-        <div className="h-screen w-64 bg-gray-900 text-white flex flex-col fixed left-0 top-0 border-r border-gray-800">
+        <div className="h-screen w-56 bg-gray-900 text-white flex flex-col fixed left-0 top-0 border-r border-gray-800">
             <div className="p-6 border-b border-gray-800">
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
                     MRP System
@@ -54,11 +72,11 @@ const Sidebar = () => {
             </nav>
 
             <div className="p-4 border-t border-gray-800">
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/50">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/50" id="sys-signature">
                     {/* Avatar removed as requested */}
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">OptiStock AI</p>
-                        <p className="text-xs text-gray-400 truncate">utkuozkale@gmail.com</p>
+                        <p className="text-sm font-medium text-white truncate">{sysInfo.brand}</p>
+                        <p className="text-xs text-gray-400 truncate">{sysInfo.mail}</p>
                     </div>
                 </div>
             </div>

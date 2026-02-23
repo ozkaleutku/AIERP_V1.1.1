@@ -1,7 +1,3 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 from backend.database.db_helper import run_query, run_command
 import pandas as pd
 
@@ -22,7 +18,7 @@ def create_item(item_id, item_type, quantity_type, status='Aktif'):
     params = (item_id, item_type, quantity_type, status)
     return run_command(query, params)
 
-def search_items(item_id=None, item_type=None, status=None):
+def search_items(item_id=None, item_type=None, status=None, limit=None, offset=None):
     """
     Ürünleri dinamik filtrelerle arar.
     
@@ -30,46 +26,44 @@ def search_items(item_id=None, item_type=None, status=None):
         item_id (str): Ürün kodu (Opsiyonel - pattern match yapılabilir)
         item_type (str): 'mamül', 'hammadde' vb. (Opsiyonel)
         status (str): 'Aktif' / 'Pasif' (Opsiyonel)
+        limit (int): Sayfa başına kayıt (Opsiyonel)
+        offset (int): Atlanacak kayıt (Opsiyonel)
+    
+    Returns:
+        tuple: (DataFrame, total_count) if limit is specified, else DataFrame
     """
-    query = "SELECT * FROM item WHERE 1=1"
+    base_where = " WHERE 1=1"
     params = []
     
     if item_id:
-        # ID için tam eşleşme yerine içerir (ILIKE) mantığı daha kullanışlı olabilir
-        if '%' in item_id:
-            query += " AND item_id ILIKE %s"
-        else:
-            query += " AND item_id = %s"
-        params.append(item_id)
+        base_where += " AND item_id ILIKE %s"
+        params.append(f"%{item_id}%")
         
     if item_type:
-        query += " AND item_type = %s"
+        base_where += " AND item_type = %s"
         params.append(item_type)
         
     if status:
-        query += " AND activity_status = %s"
+        base_where += " AND activity_status = %s"
         params.append(status)
-        
-    query += " ORDER BY item_id"
     
-    return run_query(query, tuple(params))
+    if limit is not None:
+        # Get total count first
+        count_query = "SELECT COUNT(*) as total FROM item" + base_where
+        count_df = run_query(count_query, tuple(params))
+        total = int(count_df.iloc[0]['total']) if not count_df.empty else 0
+        
+        # Get paginated data
+        query = "SELECT * FROM item" + base_where + " ORDER BY item_id LIMIT %s OFFSET %s"
+        params.append(limit)
+        params.append(offset or 0)
+        df = run_query(query, tuple(params))
+        return df, total
+    else:
+        query = "SELECT * FROM item" + base_where + " ORDER BY item_id"
+        return run_query(query, tuple(params))
 
-    if status:
-        fields.append("activity_status = %s")
-        params.append(status)
-        
-    if 'min_buffer' in locals() and locals()['min_buffer'] is not None:
-         # Note: min_buffer parameter must be passed explicitly to this function
-         pass 
-         
-    # To support min_buffer properly without breaking signature:
-    # Actually better to just modify the signature above if we can, 
-    # but the instruction is "Add min_buffer to update_item".
-    
-    # Wait, replace_file_content replaces the whole block.
-    # I will rewrite the function with min_buffer argument.
-    
-def update_item(item_id, item_type=None, quantity_type=None, status=None, min_buffer=None):
+def update_item(item_id, item_type=None, quantity_type=None, status=None):
     """
     Ürün özelliklerini günceller.
     Değer gönderilmeyen (None) alanlar güncellenmez.
@@ -89,10 +83,6 @@ def update_item(item_id, item_type=None, quantity_type=None, status=None, min_bu
     if status:
         fields.append("activity_status = %s")
         params.append(status)
-        
-    if min_buffer is not None:
-        fields.append("min_buffer = %s")
-        params.append(min_buffer)
         
     if not fields:
         return False

@@ -1,29 +1,34 @@
 import { useState, useMemo, useEffect } from "react";
-import { Search, Edit2, CheckCircle2, XCircle, Plus, X } from "lucide-react";
+import { Search, Filter, Plus, Edit2, X, Trash2, Globe, Phone, Mail, MapPin } from "lucide-react";
 import api from "../api";
+import toast from "react-hot-toast";
+import ConfirmModal from "../components/ConfirmModal";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 // New Supplier Modal Component
-const NewSupplierModal = ({ onClose, onSubmit }) => {
+const NewSupplierModal = ({ onClose, onSubmit, existingSuppliers = [] }) => {
     const [formData, setFormData] = useState({
         item_id: "",
         supplier_id: "",
-        given_leadtime: 0,
-        given_leadtime_deviation: 0,
-        lot_size: 0,
-        min_size: 0,
-        max_size: 0,
+        given_leadtime: "",
+        given_leadtime_deviation: "",
+        lot_size: "",
+        min_size: "",
+        max_size: "",
         calculated: false,
         status: "Aktif",
     });
 
     const [products, setProducts] = useState([]);
+    const [error, setError] = useState("");
 
     useEffect(() => {
         const fetchProducts = async () => {
             try {
                 const response = await api.get("/products");
-                setProducts(response.data.data || response.data || []);
+                const allProducts = response.data.data || response.data || [];
+                // Filter out 'mamül' (Finished Goods)
+                setProducts(allProducts.filter(p => p.item_type !== 'mamül'));
             } catch (error) {
                 console.error("Error fetching products:", error);
             }
@@ -33,7 +38,43 @@ const NewSupplierModal = ({ onClose, onSubmit }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        onSubmit(formData);
+        setError("");
+
+        if (formData.given_leadtime === "" || parseFloat(formData.given_leadtime) < 0) {
+            setError("Lütfen geçerli bir süre giriniz!");
+            return;
+        }
+
+        if (
+            parseFloat(formData.given_leadtime_deviation) < 0 ||
+            parseFloat(formData.lot_size) < 0 ||
+            parseFloat(formData.min_size) < 0 ||
+            parseFloat(formData.max_size) < 0
+        ) {
+            setError("Lütfen geçerli değerler girin (Negatif sayı girilemez).");
+            return;
+        }
+
+        // Convert empty strings to 0 before submitting
+        const dataToSubmit = {
+            ...formData,
+            given_leadtime: parseFloat(formData.given_leadtime) || 0,
+            given_leadtime_deviation: parseFloat(formData.given_leadtime_deviation) || 0,
+            lot_size: parseFloat(formData.lot_size) || 0,
+            min_size: parseFloat(formData.min_size) || 0,
+            max_size: parseFloat(formData.max_size) || 0,
+        };
+
+        try {
+            await onSubmit(dataToSubmit);
+        } catch (err) {
+            if (err.response && err.response.status === 409) {
+                setError("Bu ürün ve tedarikçi zaten eşleşmiş!");
+            } else {
+                setError("Bir hata oluştu. Lütfen tekrar deneyin.");
+                console.error(err);
+            }
+        }
     };
 
     return (
@@ -49,8 +90,13 @@ const NewSupplierModal = ({ onClose, onSubmit }) => {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Ürün Kodu</label>
-                            <input required type="text" className="w-full border rounded p-2"
-                                value={formData.item_id} onChange={e => setFormData({ ...formData, item_id: e.target.value })}
+                            <input required type="text"
+                                className={`w-full border rounded p-2 ${error && error.includes('eşleşmiş') ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                                value={formData.item_id}
+                                onChange={e => {
+                                    setFormData({ ...formData, item_id: e.target.value });
+                                    if (error) setError("");
+                                }}
                                 list="sup-product-options"
                                 placeholder="Ürün Seçiniz veya Yazınız" />
                             <datalist id="sup-product-options">
@@ -61,37 +107,62 @@ const NewSupplierModal = ({ onClose, onSubmit }) => {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Tedarikçi Kodu</label>
-                            <input required type="text" className="w-full border rounded p-2"
-                                value={formData.supplier_id} onChange={e => setFormData({ ...formData, supplier_id: e.target.value })} />
+                            <input required type="text"
+                                className={`w-full border rounded p-2 ${error && error.includes('eşleşmiş') ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                                value={formData.supplier_id}
+                                onChange={e => {
+                                    setFormData({ ...formData, supplier_id: e.target.value });
+                                    if (error) setError("");
+                                }}
+                                list="sup-id-options"
+                                placeholder="Tedarikçi Seçiniz veya Yazınız"
+                            />
+                            <datalist id="sup-id-options">
+                                {existingSuppliers.map((supId) => (
+                                    <option key={supId} value={supId} />
+                                ))}
+                            </datalist>
                         </div>
                     </div>
+                    {error && (
+                        <p className="text-red-500 text-sm -mt-2 flex items-center gap-1 animate-in slide-in-from-top-1">
+                            <span className="inline-block w-1 h-1 rounded-full bg-red-500" />
+                            {error}
+                        </p>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Söz Verilen Süre (Gün)</label>
-                            <input type="number" className="w-full border rounded p-2"
-                                value={formData.given_leadtime} onChange={e => setFormData({ ...formData, given_leadtime: parseFloat(e.target.value) || 0 })} />
+                            <input type="number" min="0"
+                                className={`w-full border rounded p-2 ${error && error.includes('süre') ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                                placeholder="0"
+                                value={formData.given_leadtime}
+                                onChange={e => {
+                                    setFormData({ ...formData, given_leadtime: e.target.value });
+                                    if (error) setError("");
+                                }} />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Tahmini Sapma (Gün)</label>
-                            <input type="number" className="w-full border rounded p-2"
-                                value={formData.given_leadtime_deviation} onChange={e => setFormData({ ...formData, given_leadtime_deviation: parseFloat(e.target.value) || 0 })} />
+                            <input type="number" min="0" className="w-full border rounded p-2" placeholder="0"
+                                value={formData.given_leadtime_deviation} onChange={e => setFormData({ ...formData, given_leadtime_deviation: e.target.value })} />
                         </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Lot Size</label>
-                            <input type="number" className="w-full border rounded p-2"
-                                value={formData.lot_size} onChange={e => setFormData({ ...formData, lot_size: parseFloat(e.target.value) || 0 })} />
+                            <input type="number" min="0" className="w-full border rounded p-2" placeholder="0"
+                                value={formData.lot_size} onChange={e => setFormData({ ...formData, lot_size: e.target.value })} />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Min Size</label>
-                            <input type="number" className="w-full border rounded p-2"
-                                value={formData.min_size} onChange={e => setFormData({ ...formData, min_size: parseFloat(e.target.value) || 0 })} />
+                            <input type="number" min="0" className="w-full border rounded p-2" placeholder="0"
+                                value={formData.min_size} onChange={e => setFormData({ ...formData, min_size: e.target.value })} />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Max Size</label>
-                            <input type="number" className="w-full border rounded p-2"
-                                value={formData.max_size} onChange={e => setFormData({ ...formData, max_size: parseFloat(e.target.value) || 0 })} />
+                            <input type="number" min="0" className="w-full border rounded p-2" placeholder="0"
+                                value={formData.max_size} onChange={e => setFormData({ ...formData, max_size: e.target.value })} />
                         </div>
                     </div>
 
@@ -118,6 +189,8 @@ const NewSupplierModal = ({ onClose, onSubmit }) => {
     );
 };
 
+
+
 const Suppliers = () => {
     const [suppliers, setSuppliers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -125,10 +198,26 @@ const Suppliers = () => {
         itemId: "",
         supplierId: "",
         status: "", // "Aktif" | "Pasif" | ""
+        calculated: "", // "true" | "false" | ""
     });
     const [editingId, setEditingId] = useState(null); // Composite Key: itemId-supplierId
     const [editForm, setEditForm] = useState({});
     const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // Confirmation State
+    const [confirmModal, setConfirmModal] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        itemId: null,
+        supplierId: null,
+        type: 'danger'
+    });
+
+    // Valid unique supplier IDs for autocomplete
+    const uniqueSupplierIds = useMemo(() => {
+        return [...new Set(suppliers.map(s => s.supplier_id))];
+    }, [suppliers]);
 
     // Fetch Suppliers on Mount
     useEffect(() => {
@@ -153,7 +242,8 @@ const Suppliers = () => {
             const matchesItem = item.item_id.toLowerCase().includes(filters.itemId.toLowerCase());
             const matchesSupplier = item.supplier_id.toLowerCase().includes(filters.supplierId.toLowerCase());
             const matchesStatus = filters.status ? item.activity_status === filters.status : true;
-            return matchesItem && matchesSupplier && matchesStatus;
+            const matchesCalculated = filters.calculated === "" ? true : (filters.calculated === "true" ? item.calculated : !item.calculated);
+            return matchesItem && matchesSupplier && matchesStatus && matchesCalculated;
         });
     }, [suppliers, filters]);
 
@@ -166,17 +256,45 @@ const Suppliers = () => {
     };
 
     const handleClearFilters = () => {
-        setFilters({ itemId: "", supplierId: "", status: "" });
+        setFilters({ itemId: "", supplierId: "", status: "", calculated: "" });
     };
 
     const handleAddSupplier = async (newData) => {
+        // Error handling is managed in the modal
+        const toastId = toast.loading("Tedarikçi ilişkisi oluşturuluyor...");
         try {
             await api.post("/suppliers", newData);
+            toast.success("Tedarikçi ilişkisi başarıyla oluşturuldu.", { id: toastId });
             fetchSuppliers();
             setIsModalOpen(false);
         } catch (error) {
-            console.error("Error creating supplier:", error);
-            alert("Hata oluştu.");
+            console.error("Error adding supplier:", error);
+            toast.error(error.response?.data?.detail || "İşlem sırasında bir hata oluştu.", { id: toastId });
+        }
+    };
+
+    const handleDeleteClick = (item_id, supplier_id) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'İlişkiyi Sil',
+            message: `${item_id} - ${supplier_id} ilişkisini silmek istediğinize emin misiniz?`,
+            itemId: item_id,
+            supplierId: supplier_id,
+            type: 'danger'
+        });
+    };
+
+    const confirmDelete = async () => {
+        if (!confirmModal.itemId || !confirmModal.supplierId) return;
+
+        try {
+            await api.delete(`/suppliers/${confirmModal.itemId}/${confirmModal.supplierId}`);
+            fetchSuppliers();
+            setConfirmModal({ ...confirmModal, isOpen: false });
+            toast.success("Tedarikçi ilişkisi başarıyla silindi.");
+        } catch (error) {
+            console.error("Error deleting supplier relation:", error);
+            toast.error("Silme işlemi başarısız.");
         }
     };
 
@@ -192,6 +310,18 @@ const Suppliers = () => {
     };
 
     const saveEditing = async () => {
+        if (
+            parseFloat(editForm.given_leadtime) < 0 ||
+            parseFloat(editForm.given_leadtime_deviation) < 0 ||
+            parseFloat(editForm.lot_size) < 0 ||
+            parseFloat(editForm.min_size) < 0 ||
+            parseFloat(editForm.max_size) < 0
+        ) {
+            toast.error("Lütfen geçerli değerler girin (Negatif sayı girilemez).");
+            return;
+        }
+
+        const toastId = toast.loading("Tedarikçi güncelleniyor...");
         try {
             await api.put("/suppliers/update", {
                 item_id: editForm.item_id,
@@ -205,17 +335,12 @@ const Suppliers = () => {
                 status: editForm.activity_status
             });
 
-            setSuppliers((prev) => prev.map((item) => {
-                const key = `${item.item_id}-${item.supplier_id}`;
-                if (key === editingId) {
-                    return editForm;
-                }
-                return item;
-            }));
+            toast.success("Tedarikçi güncellendi.", { id: toastId });
             setEditingId(null);
+            await fetchSuppliers();
         } catch (error) {
             console.error("Error updating supplier:", error);
-            alert("Güncelleme başarısız oldu.");
+            toast.error(error.response?.data?.detail || "Güncelleme başarısız oldu.", { id: toastId });
         }
     };
 
@@ -230,9 +355,9 @@ const Suppliers = () => {
     if (loading) return <div className="p-6">Yükleniyor...</div>;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 h-full flex flex-col">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center shrink-0">
                 <div>
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
                         Tedarikçiler
@@ -245,7 +370,7 @@ const Suppliers = () => {
             </div>
 
             {/* Filters */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-center">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-center shrink-0">
                 <div className="relative flex-1 w-full md:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input
@@ -280,6 +405,18 @@ const Suppliers = () => {
                         <option value="Pasif">Pasif</option>
                     </select>
                 </div>
+                <div className="relative w-full md:w-48">
+                    <select
+                        name="calculated"
+                        value={filters.calculated}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    >
+                        <option value="">Tümü (Veri Tipi)</option>
+                        <option value="true">Otomatik (Hesaplanan)</option>
+                        <option value="false">Manuel Girilen</option>
+                    </select>
+                </div>
                 <button
                     onClick={handleClearFilters}
                     className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium border border-gray-200 w-full md:w-auto"
@@ -289,10 +426,10 @@ const Suppliers = () => {
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50 border-b border-gray-100">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col min-h-0">
+                <div className="flex-1 overflow-y-auto">
+                    <table className="w-full relative">
+                        <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-20">
                             <tr>
                                 <th className="px-4 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ürün</th>
                                 <th className="px-4 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tedarikçi</th>
@@ -305,7 +442,7 @@ const Suppliers = () => {
                                 <th className="px-4 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Min</th>
                                 <th className="px-4 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Max</th>
                                 <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Durum</th>
-                                <th className="px-4 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">İşlemler</th>
+                                <th className="px-4 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider sticky right-0 z-10 bg-gray-50 shadow-[-12px_0_15px_-4px_rgba(0,0,0,0.05)]">İşlemler</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -317,7 +454,7 @@ const Suppliers = () => {
                                 return (
                                     <tr
                                         key={rowKey}
-                                        className={`hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-yellow-50/50" : ""}`}
+                                        className={`group hover:bg-gray-50 transition-colors ${isEditing ? "bg-yellow-50" : ""}`}
                                     >
                                         <td className="px-4 py-4 text-sm font-medium text-gray-900">{item.item_id}</td>
                                         <td className="px-4 py-4 text-sm text-gray-600">{item.supplier_id}</td>
@@ -346,6 +483,7 @@ const Suppliers = () => {
                                             {isEditing ? (
                                                 <input
                                                     type="number"
+                                                    min="0"
                                                     name="given_leadtime"
                                                     disabled={useCalculated}
                                                     value={editForm.given_leadtime}
@@ -364,6 +502,7 @@ const Suppliers = () => {
                                             {isEditing ? (
                                                 <input
                                                     type="number"
+                                                    min="0"
                                                     name="given_leadtime_deviation"
                                                     disabled={useCalculated}
                                                     value={editForm.given_leadtime_deviation}
@@ -390,22 +529,22 @@ const Suppliers = () => {
                                         {/* Lot Size */}
                                         <td className="px-4 py-4 text-right text-sm text-gray-600">
                                             {isEditing ? (
-                                                <input type="number" name="lot_size" value={editForm.lot_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
-                                            ) : (item.lot_size || 0)}
+                                                <input type="number" min="0" name="lot_size" value={editForm.lot_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
+                                            ) : (item.lot_size || '-')}
                                         </td>
 
                                         {/* Min Size */}
                                         <td className="px-4 py-4 text-right text-sm text-gray-600">
                                             {isEditing ? (
-                                                <input type="number" name="min_size" value={editForm.min_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
-                                            ) : (item.min_size || 0)}
+                                                <input type="number" min="0" name="min_size" value={editForm.min_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
+                                            ) : (item.min_size || '-')}
                                         </td>
 
                                         {/* Max Size */}
                                         <td className="px-4 py-4 text-right text-sm text-gray-600">
                                             {isEditing ? (
-                                                <input type="number" name="max_size" value={editForm.max_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
-                                            ) : (item.max_size || 0)}
+                                                <input type="number" min="0" name="max_size" value={editForm.max_size} onChange={handleEditChange} className="w-16 px-1 border rounded text-right" />
+                                            ) : (item.max_size || '-')}
                                         </td>
 
                                         {/* Status */}
@@ -421,16 +560,21 @@ const Suppliers = () => {
                                             )}
                                         </td>
 
-                                        <td className="px-4 py-4 text-right text-sm font-medium">
+                                        <td className={`px-4 py-4 text-right text-sm font-medium sticky right-0 z-10 shadow-[-12px_0_15px_-4px_rgba(0,0,0,0.05)] transition-colors ${isEditing ? "bg-yellow-50" : "bg-white group-hover:bg-gray-50"}`}>
                                             {isEditing ? (
                                                 <div className="flex items-center justify-end gap-2">
                                                     <button onClick={saveEditing} className="text-green-600 hover:text-green-900 bg-green-50 p-1.5 rounded-lg"> <CheckCircle2 size={16} /> </button>
                                                     <button onClick={cancelEditing} className="text-red-600 hover:text-red-900 bg-red-50 p-1.5 rounded-lg"> <XCircle size={16} /> </button>
                                                 </div>
                                             ) : (
-                                                <button onClick={() => startEditing(item)} className="text-blue-600 hover:text-blue-900 bg-blue-50 px-2 py-1.5 rounded-lg flex items-center gap-1 ml-auto">
-                                                    <Edit2 size={14} />
-                                                </button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button onClick={() => handleDeleteClick(item.item_id, item.supplier_id)} className="text-red-600 hover:text-red-900 bg-red-50 p-1.5 rounded-lg">
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                    <button onClick={() => startEditing(item)} className="text-blue-600 hover:text-blue-900 bg-blue-50 px-2 py-1.5 rounded-lg flex items-center gap-1">
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -455,8 +599,19 @@ const Suppliers = () => {
                 <NewSupplierModal
                     onClose={() => setIsModalOpen(false)}
                     onSubmit={handleAddSupplier}
+                    existingSuppliers={uniqueSupplierIds}
                 />
             )}
+
+            {/* Confirmation Modal */}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                onConfirm={confirmDelete}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                type={confirmModal.type}
+            />
         </div>
     );
 };

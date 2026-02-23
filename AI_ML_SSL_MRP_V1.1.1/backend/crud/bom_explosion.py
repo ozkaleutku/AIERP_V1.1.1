@@ -1,9 +1,3 @@
-import sys
-import os
-
-# Add backend root to sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import pandas as pd
 from backend.database.db_helper import run_query, run_command, run_command_batch
 from backend.logger import get_logger
@@ -52,22 +46,17 @@ def run_bom_explosion():
             break
             
         # BOM bilgisini çek
-        parents = tuple(df_current['item_id'].unique())
+        parents = list(df_current['item_id'].unique())
         if not parents:
              break
-             
-        if len(parents) == 1:
-            parents_str = f"('{parents[0]}')"
-        else:
-            parents_str = str(tuple(parents))
 
         # Sadece AKTİF reçete bileşenlerini çek
-        query_bom = f"""
+        query_bom = """
         SELECT parent_id, child_id, amount as bom_multiplier 
         FROM bom 
-        WHERE parent_id IN {parents_str} AND activity_status = 'Aktif'
+        WHERE parent_id = ANY(%s) AND activity_status = 'Aktif'
         """
-        df_bom = run_query(query_bom)
+        df_bom = run_query(query_bom, (parents,))
         
         if df_bom.empty:
             logger.warning(f"      Level {next_level} icin alt parca (child) bulunamadi.")
@@ -88,14 +77,10 @@ def run_bom_explosion():
         # 4. Veritabanına Yaz
         if not df_next_level.empty:
             # Child itemların özelliklerini (Type, Qty Type) çek
-            child_ids = tuple(df_next_level['child_id'].unique())
-            if len(child_ids) == 1:
-                child_ids_str = f"('{child_ids[0]}')"
-            else:
-                child_ids_str = str(tuple(child_ids))
+            child_ids = list(df_next_level['child_id'].unique())
                 
-            query_items = f"SELECT item_id, item_type, item_quantity_type FROM item WHERE item_id IN {child_ids_str}"
-            df_items = run_query(query_items)
+            query_items = "SELECT item_id, item_type, item_quantity_type FROM item WHERE item_id = ANY(%s)"
+            df_items = run_query(query_items, (child_ids,))
             
             # Özellikleri hesaplanan miktarlarla birleştir
             df_final = df_next_level.merge(df_items, left_on='child_id', right_on='item_id', how='left')

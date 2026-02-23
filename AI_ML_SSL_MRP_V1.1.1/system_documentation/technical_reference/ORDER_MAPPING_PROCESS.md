@@ -261,7 +261,7 @@ graph TD
     B --> C{Birden Fazla Tedarikçi?}
     C -- Evet --> D[En Düşük Lead Time Seç]
     C -- Hayır --> E[Tek Tedarikçi Kullan]
-    D --> F[Lot Size Kontrolü]
+    D --> F[Lot Size Kontrolü (Planlanan - Kodda henüz aktif değil)]
     E --> F
     F --> G{Miktar < Min Lot?}
     G -- Evet --> H[Min Lot Size Uygula]

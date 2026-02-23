@@ -1,41 +1,68 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Search, Edit2, CheckCircle2, XCircle, ArrowRightLeft, Factory, Truck, Info, Boxes } from "lucide-react";
+import toast from "react-hot-toast";
 import api from "../api";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 const Inventory = () => {
     const [inventory, setInventory] = useState([]);
-    const [activeOrders, setActiveOrders] = useState([]); // Active Customer Orders
+    const [activeOrders, setActiveOrders] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filters, setFilters] = useState({
-        itemId: "",
-    });
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [searchInput, setSearchInput] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
 
     // Inline Edit State
     const [editingId, setEditingId] = useState(null);
     const [editAmount, setEditAmount] = useState(0);
 
     // Stock Movement Modal State
+    const [products, setProducts] = useState([]);
     const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Sidebar starts open on desktop
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [movementForm, setMovementForm] = useState({
         item_id: "",
         amount: "",
-        purpose: "üretim_çıkışı",
-        order_id: "" // For partial consumption
+        purpose: "üretime_giden",
+        order_id: "",
+        date: new Date().toISOString().split('T')[0]
     });
 
-    // Fetch Data on Mount
+    // Debounce search input → query
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearchQuery(searchInput);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
+
+    // Reset and fetch when search changes
+
+    // Fetch Init on Mount
     useEffect(() => {
         fetchInventory();
         fetchActiveOrders();
+        fetchProducts();
+
+        // Polling for active orders (every 2 minutes) to keep sidebar updated without F5
+        const interval = setInterval(fetchActiveOrders, 120000);
+        return () => clearInterval(interval);
     }, []);
+
+    const fetchProducts = async () => {
+        try {
+            const response = await api.get("/products?limit=10000");
+            setProducts(response.data.data || []);
+        } catch (error) {
+            console.error("Error fetching products:", error);
+        }
+    };
 
     const fetchInventory = async () => {
         setLoading(true);
         try {
-            const response = await api.get("/inventory");
-            setInventory(response.data);
+            const response = await api.get("/inventory?limit=10000");
+            setInventory(response.data.data);
         } catch (error) {
             console.error("Error fetching inventory:", error);
         } finally {
@@ -46,32 +73,44 @@ const Inventory = () => {
     const fetchActiveOrders = async () => {
         try {
             const response = await api.get("/customer-orders");
-            // Filter only active orders (Bekleniyor, Üretimde)
-            const active = response.data.filter(o => ['Bekleniyor', 'Üretimde'].includes(o.status));
+            const active = response.data.filter(o => ['Bekleniyor', 'Üretimde', 'Hazır'].includes(o.status));
             setActiveOrders(active);
         } catch (error) {
             console.error("Error fetching orders:", error);
         }
     };
 
-    // Filter Logic
     const filteredData = useMemo(() => {
-        return inventory.filter((item) => {
-            const matchesId = item.item_id.toLowerCase().includes(filters.itemId.toLowerCase());
-            return matchesId;
+        if (!searchQuery) return inventory;
+        return inventory.filter(item => item.item_id.toLowerCase().includes(searchQuery.toLowerCase()));
+    }, [inventory, searchQuery]);
+
+    const stats = useMemo(() => {
+        const counts = { variety: 0, adet: 0, gram: 0, litre: 0 };
+        counts.variety = filteredData.length;
+        filteredData.forEach(item => {
+            const amount = parseFloat(item.amount) || 0;
+            const unit = (item.unit || "").toLowerCase();
+            if (unit.includes('adet')) counts.adet += amount;
+            else if (unit.includes('gram') || unit.includes('gr')) counts.gram += amount;
+            else if (unit.includes('litre') || unit.includes('lt')) counts.litre += amount;
         });
-    }, [inventory, filters]);
+        return counts;
+    }, [filteredData]);
 
-    // Infinite scroll hook
-    const { visibleData, hasMore, loaderRef, visibleCount, totalCount } = useInfiniteScroll(filteredData, filters);
+    const { visibleData, hasMore, loaderRef, totalCount: totalRecords } = useInfiniteScroll(filteredData);
 
-    const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        setFilters((prev) => ({ ...prev, [name]: value }));
+    const refreshInventory = () => {
+        fetchInventory();
+        fetchActiveOrders();
     };
 
-    const handleClearFilters = () => {
-        setFilters({ itemId: "" });
+    const handleSearchChange = (e) => {
+        setSearchInput(e.target.value);
+    };
+
+    const handleClearSearch = () => {
+        setSearchInput("");
     };
 
     // Inline Edit Handlers (For quick correction)
@@ -92,13 +131,14 @@ const Inventory = () => {
                 amount: parseFloat(editAmount)
             });
 
+            // Update local state optimistically, then refresh from backend
             setInventory(prev => prev.map(item =>
                 item.item_id === itemId ? { ...item, amount: parseFloat(editAmount) } : item
             ));
             setEditingId(null);
         } catch (error) {
             console.error("Error updating inventory:", error);
-            alert("Güncelleme başarısız oldu.");
+            toast.error("Güncelleme başarısız oldu.");
         }
     };
 
@@ -107,8 +147,9 @@ const Inventory = () => {
         setMovementForm({
             item_id: item ? item.item_id : "",
             amount: "",
-            purpose: "üretim_çıkışı",
-            order_id: ""
+            purpose: "üretime_giden",
+            order_id: "",
+            date: new Date().toISOString().split('T')[0]
         });
         setIsMovementModalOpen(true);
     };
@@ -120,33 +161,32 @@ const Inventory = () => {
                 item_id: movementForm.item_id,
                 amount: parseFloat(movementForm.amount),
                 purpose: movementForm.purpose,
-                date: new Date().toISOString().split('T')[0]
+                date: movementForm.date || new Date().toISOString().split('T')[0]
             };
 
-            // Only send order_id if purpose is production related
-            if (movementForm.purpose === 'üretim_çıkışı' && movementForm.order_id) {
+            if (movementForm.order_id && movementForm.order_id.toString().trim() !== '') {
                 payload.order_id = parseInt(movementForm.order_id);
             }
 
             await api.post("/stock-movements", payload);
 
-            alert("Stok hareketi başarıyla işlendi.");
+            toast.success("Stok hareketi başarıyla işlendi.");
             setIsMovementModalOpen(false);
-            fetchInventory(); // Refresh stock
+            refreshInventory(); // Refresh stock
         } catch (error) {
             console.error("Error creating movement:", error);
-            alert("İşlem başarısız: " + (error.response?.data?.detail || error.message));
+            toast.error("İşlem başarısız: " + (error.response?.data?.detail || error.message));
         }
     };
 
     if (loading) return <div className="p-6">Yükleniyor...</div>;
 
     return (
-        <div className="flex gap-6">
+        <div className="flex gap-6 h-full">
             {/* Main Content */}
-            <div className="flex-1 space-y-6 min-w-0">
+            <div className="flex-1 flex flex-col space-y-4 min-h-0">
                 {/* Header */}
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start flex-shrink-0">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
                             Envanter Durumu
@@ -162,45 +202,62 @@ const Inventory = () => {
                     </button>
                 </div>
 
-                {/* Stats Cards - Omitted for brevity, kept same as before generally */}
+                {/* Stats Cards */}
                 {!loading && (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 flex-shrink-0">
                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                             <div className="flex items-center gap-2 mb-1">
                                 <Boxes className="text-blue-600" size={18} />
                                 <span className="text-blue-600 text-sm font-semibold">Çeşit</span>
                             </div>
-                            <div className="text-2xl font-bold text-gray-800">{inventory.length}</div>
+                            <div className="text-2xl font-bold text-gray-800">{stats.variety}</div>
                         </div>
-                        {/* More stats can be here */}
+                        <div className="bg-green-50 p-4 rounded-xl border border-green-100">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="text-green-600 text-sm font-semibold">Toplam (Adet)</span>
+                            </div>
+                            <div className="text-2xl font-bold text-gray-800">{stats.adet.toLocaleString()}</div>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="text-orange-600 text-sm font-semibold">Toplam (Gram)</span>
+                            </div>
+                            <div className="text-2xl font-bold text-gray-800">{stats.gram.toLocaleString()}</div>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="text-purple-600 text-sm font-semibold">Toplam (Litre)</span>
+                            </div>
+                            <div className="text-2xl font-bold text-gray-800">{stats.litre.toLocaleString()}</div>
+                        </div>
                     </div>
                 )}
 
                 {/* Filters */}
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex gap-4 items-center">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex gap-4 items-center flex-shrink-0">
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                         <input
                             type="text"
                             name="itemId"
                             placeholder="Ürün Kodu Ara..."
-                            value={filters.itemId}
-                            onChange={handleInputChange}
+                            value={searchInput}
+                            onChange={handleSearchChange}
                             className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                         />
                     </div>
                 </div>
 
                 {/* Main Table */}
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-100">
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 overflow-y-auto">
+                        <table className="w-full relative">
+                            <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Ürün Kodu</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Mevcut Stok</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Birim</th>
-                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase">İşlemler</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Ürün Kodu</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Mevcut Stok</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Birim</th>
+                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">İşlemler</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -243,16 +300,23 @@ const Inventory = () => {
                                         </tr>
                                     );
                                 })}
+
+                                {hasMore && (
+                                    <tr ref={loaderRef}>
+                                        <td colSpan="4" className="py-6 text-center text-sm text-gray-400">
+                                            Daha fazla yükleniyor...
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
-                        {hasMore && <div ref={loaderRef} className="h-4 w-full"></div>}
                     </div>
                 </div>
             </div>
 
             {/* Right Sidebar - Active Orders (Collapsible) */}
-            <div className={`bg-white border-l border-gray-200 transition-all duration-300 ease-in-out h-[calc(100vh-2rem)] sticky top-4 flex flex-col ${isSidebarOpen ? 'w-80 p-4 opacity-100' : 'w-0 p-0 opacity-0 overflow-hidden border-none'}`}>
-                <div className="flex items-center justify-between mb-4 min-w-[280px]">
+            <div className={`transition-all duration-300 ease-in-out border-l border-gray-200 bg-white flex flex-col h-full flex-shrink-0 relative ${isSidebarOpen ? 'w-80 opacity-100 p-4' : 'w-0 opacity-0 p-0 overflow-hidden border-none'}`}>
+                <div className="flex items-center justify-between mb-4 min-w-[280px] flex-shrink-0">
                     <div className="flex items-center gap-2">
                         <Factory className="text-blue-600" size={20} />
                         <h2 className="text-lg font-bold text-gray-800">Aktif Üretim Emirleri</h2>
@@ -270,7 +334,7 @@ const Inventory = () => {
                             <div key={order.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
                                 <div className="flex justify-between items-start mb-1">
                                     <span className="font-bold text-gray-900">#{order.id}</span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${order.status === 'Üretimde' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${order.status === 'Üretimde' ? 'bg-orange-100 text-orange-700' : order.status === 'Hazır' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-700'}`}>
                                         {order.status}
                                     </span>
                                 </div>
@@ -318,27 +382,23 @@ const Inventory = () => {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Ürün Kodu</label>
                                 <input
                                     type="text"
+                                    list="products-list-inventory"
                                     required
+                                    placeholder="Ürün seçin veya yazın..."
                                     value={movementForm.item_id}
                                     onChange={e => setMovementForm({ ...movementForm, item_id: e.target.value })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
+                                <datalist id="products-list-inventory">
+                                    {products.map(p => (
+                                        <option key={p.item_id} value={p.item_id}>
+                                            {p.item_type ? `${p.item_id} - ${p.item_type}` : p.item_id}
+                                        </option>
+                                    ))}
+                                </datalist>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Amaç</label>
-                                    <select
-                                        value={movementForm.purpose}
-                                        onChange={e => setMovementForm({ ...movementForm, purpose: e.target.value })}
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value="üretim_çıkışı">Üretime Çıkış</option>
-                                        <option value="satış_çıkışı">Doğrudan Satış</option>
-                                        <option value="giriş">Stok Girişi</option>
-                                        <option value="zayi">Zayi / Fire</option>
-                                    </select>
-                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Miktar</label>
                                     <input
@@ -350,32 +410,58 @@ const Inventory = () => {
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Tarih</label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={movementForm.date}
+                                        onChange={e => setMovementForm({ ...movementForm, date: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
                             </div>
 
-                            {/* Order Selection - Visible only for production out */}
-                            {movementForm.purpose === 'üretim_çıkışı' && (
-                                <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                                    <label className="block text-sm font-medium text-yellow-800 mb-1 flex items-center gap-1">
-                                        <Factory size={14} />
-                                        Hangi Sipariş İçin?
-                                    </label>
-                                    <select
-                                        value={movementForm.order_id}
-                                        onChange={e => setMovementForm({ ...movementForm, order_id: e.target.value })}
-                                        className="w-full px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 outline-none bg-white"
-                                    >
-                                        <option value="">-- Genel Stok Çıkışı (Siparişsiz) --</option>
-                                        {activeOrders.map(order => (
-                                            <option key={order.id} value={order.id}>
-                                                #{order.id} - {order.customer_name} ({order.item_id})
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-yellow-600 mt-1">
-                                        Eğer bir sipariş için çıkış yapıyorsanız buradan seçiniz. Simülasyon bu miktarı düşecektir.
-                                    </p>
-                                </div>
-                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">İşlem Amacı (Tür)</label>
+                                <select
+                                    value={movementForm.purpose}
+                                    onChange={e => setMovementForm({ ...movementForm, purpose: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                    <option value="üretime_giden">Üretime Giden (Üretime Çıkış)</option>
+                                    <option value="satış_çıkışı">Satış Çıkışı (Sevkıyat)</option>
+                                    <option value="giriş">Giriş (Stok Artır)</option>
+                                    <option value="çıkış">Çıkış (Diğer Stok Düşür)</option>
+                                </select>
+                            </div>
+
+                            {/* Order Selection - Visible always */}
+                            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                                <label className="block text-sm font-medium text-yellow-800 mb-1 flex items-center gap-1">
+                                    <Factory size={14} />
+                                    Hangi Sipariş İçin?
+                                </label>
+                                <input
+                                    type="text"
+                                    list="active-orders-list"
+                                    placeholder="Sipariş No (Örn: 1024) Ara (Opsiyonel)"
+                                    value={movementForm.order_id}
+                                    onChange={e => setMovementForm({ ...movementForm, order_id: e.target.value })}
+                                    className="w-full px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 outline-none bg-white font-medium"
+                                />
+                                <datalist id="active-orders-list">
+                                    <option value="">-- Genel Stok İşlemi (Siparişsiz) --</option>
+                                    {activeOrders.map(order => (
+                                        <option key={order.id} value={order.id}>
+                                            #{order.id} - {order.customer_name} ({order.item_id})
+                                        </option>
+                                    ))}
+                                </datalist>
+                                <p className="text-xs text-yellow-600 mt-1">
+                                    Eğer bir sipariş için işlem yapıyorsanız buradan seçiniz. Üretim çıkışı ise simülasyon bu miktarı düşecektir.
+                                </p>
+                            </div>
 
                             <div className="flex justify-end gap-3 mt-6">
                                 <button

@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Search, Filter, Plus, Calendar as CalendarIcon, Edit2, X, Trash2, Users } from "lucide-react";
+import { Search, Filter, Plus, Calendar as CalendarIcon, Edit2, X, Trash2, Users, Check } from "lucide-react";
 import api from "../api";
+import toast from "react-hot-toast";
+import ConfirmModal from "../components/ConfirmModal";
 
 const BATCH_SIZE = 30; // Number of rows to load per batch
 
 // New Customer Order Modal
-const NewCustomerOrderModal = ({ onClose, onSubmit }) => {
+const NewCustomerOrderModal = ({ onClose, onSubmit, orders = [] }) => {
     const [formData, setFormData] = useState({
         customer_name: "",
         item_id: "",
@@ -17,48 +19,44 @@ const NewCustomerOrderModal = ({ onClose, onSubmit }) => {
         status: "Bekleniyor"
     });
 
-    const [productSuggestions, setProductSuggestions] = useState([]);
-    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [allProducts, setAllProducts] = useState([]);
 
-    // Dynamic Search for Products
     useEffect(() => {
-        const delayDebounceFn = setTimeout(async () => {
-            if (formData.item_id && formData.item_id.length > 1) {
-                try {
-                    const response = await api.get("/products", {
-                        params: {
-                            search: formData.item_id,
-                            limit: 10
-                        }
-                    });
-                    // Response format: { data: [...], ... }
-                    setProductSuggestions(response.data.data || []);
-                    setShowSuggestions(true);
-                } catch (error) {
-                    console.error("Error searching products:", error);
-                }
-            } else {
-                setProductSuggestions([]);
-                setShowSuggestions(false);
+        const fetchAllProducts = async () => {
+            try {
+                const response = await api.get("/products", {
+                    params: { limit: 10000 }
+                });
+                setAllProducts(response.data.data || []);
+            } catch (error) {
+                console.error("Error fetching all products:", error);
             }
-        }, 300);
+        };
+        fetchAllProducts();
+    }, []);
 
-        return () => clearTimeout(delayDebounceFn);
-    }, [formData.item_id]);
-
-    const selectProduct = (product) => {
-        setFormData({ ...formData, item_id: product.item_id });
-        setShowSuggestions(false);
-    };
+    const uniqueCustomers = useMemo(() => {
+        return [...new Set((orders || []).map(o => o.customer_name).filter(Boolean))];
+    }, [orders]);
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const parsedAmount = parseFloat(formData.amount);
+        if (parsedAmount <= 0) {
+            toast.error("Miktar 0'dan büyük olmalıdır!");
+            return;
+        }
         onSubmit({
             ...formData,
-            amount: parseFloat(formData.amount),
-            production_time_days: parseInt(formData.production_time_days) || 0
+            amount: parsedAmount,
+            production_time_days: parseInt(formData.production_time_days) || 0,
+            expected_delivery_date: formData.expected_delivery_date || null,
+            delivery_date: formData.delivery_date || null
         });
     };
+
+
+
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in zoom-in-95 duration-200">
@@ -75,7 +73,12 @@ const NewCustomerOrderModal = ({ onClose, onSubmit }) => {
                             <label className="block text-sm font-medium text-gray-700 mb-1">Müşteri Adı</label>
                             <input required type="text" className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                 value={formData.customer_name} onChange={e => setFormData({ ...formData, customer_name: e.target.value })}
-                                placeholder="Müşteri/Firma Adı" />
+                                placeholder="Müşteri/Firma Adı" list="customer-list" autoComplete="off" />
+                            <datalist id="customer-list">
+                                {uniqueCustomers.map(c => (
+                                    <option key={c} value={c} />
+                                ))}
+                            </datalist>
                         </div>
                         <div className="relative">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Ürün</label>
@@ -85,31 +88,24 @@ const NewCustomerOrderModal = ({ onClose, onSubmit }) => {
                                 className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                 value={formData.item_id}
                                 onChange={e => setFormData({ ...formData, item_id: e.target.value })}
-                                onFocus={() => formData.item_id && setShowSuggestions(true)}
                                 placeholder="Ürün Ara (Kod)..."
+                                list="product-list"
                                 autoComplete="off"
                             />
-                            {showSuggestions && productSuggestions.length > 0 && (
-                                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                                    {productSuggestions.map(p => (
-                                        <div
-                                            key={p.item_id}
-                                            onClick={() => selectProduct(p)}
-                                            className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-gray-700 border-b border-gray-50 last:border-none flex justify-between"
-                                        >
-                                            <span className="font-medium">{p.item_id}</span>
-                                            <span className="text-gray-400 text-xs">{p.item_quantity_type}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            <datalist id="product-list">
+                                {allProducts.map(p => (
+                                    <option key={p.item_id} value={p.item_id}>
+                                        {p.item_type ? `(${p.item_type})` : ''}
+                                    </option>
+                                ))}
+                            </datalist>
                         </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Miktar</label>
-                            <input required type="number" className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            <input required type="number" min="0.0001" step="any" className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                 value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} />
                         </div>
                         <div>
@@ -194,7 +190,7 @@ const MissingSupplierModal = ({ items, onClose, onSaved }) => {
             }
         } catch (error) {
             console.error("Error adding supplier:", error);
-            alert("Tedarikçi eklenirken hata oluştu.");
+            toast.error("Tedarikçi eklenirken hata oluştu.");
         } finally {
             setSaving(false);
         }
@@ -277,6 +273,40 @@ const MissingSupplierModal = ({ items, onClose, onSaved }) => {
     );
 };
 
+const ShippingConfirmModal = ({ isOpen, onConfirm, onCancel, order }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
+                <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Users size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-900">Sevkiyat Onayı</h2>
+                    <p className="text-gray-500 mt-2">
+                        #{order.id} numaralı siparişi sevk etmek üzeresiniz.
+                        Bu işlem stokları ve satış geçmişini güncelleyecektir.
+                    </p>
+                </div>
+                <div className="flex gap-3">
+                    <button
+                        onClick={onCancel}
+                        className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+                    >
+                        İptal
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="flex-1 px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-lg shadow-blue-500/20 transition-all active:scale-95"
+                    >
+                        Onayla ve Sevk Et
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const CustomerOrders = () => {
     // ... (Keep existing State)
     const [orders, setOrders] = useState([]);
@@ -293,6 +323,12 @@ const CustomerOrders = () => {
     const [missingSuppliers, setMissingSuppliers] = useState([]);
     const [showMissingSupplierModal, setShowMissingSupplierModal] = useState(false);
 
+    // Shipment confirmation state
+    const [pendingShipment, setPendingShipment] = useState(null);
+
+    // Delete confirmation state
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
+
     // Infinite scroll state
     const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
     const loaderRef = useRef(null);
@@ -300,6 +336,16 @@ const CustomerOrders = () => {
     // Inline Updating State
     const [editingId, setEditingId] = useState(null);
     const [editForm, setEditForm] = useState({});
+
+    // Clear Filters
+    const handleClearFilters = () => {
+        setFilters({
+            search: "",
+            status: "",
+            startDate: "",
+            endDate: "",
+        });
+    };
 
     // Fetch Data
     const fetchOrders = async () => {
@@ -335,11 +381,12 @@ const CustomerOrders = () => {
                 }
             }
 
+            toast.success("Müşteri siparişi oluşturuldu.");
             fetchOrders();
             setIsModalOpen(false);
         } catch (error) {
             console.error(error);
-            alert("Hata oluştu.");
+            toast.error(error.response?.data?.detail || "Sipariş oluşturulurken hata oluştu.");
         }
     };
 
@@ -350,38 +397,79 @@ const CustomerOrders = () => {
         // Optionally refresh suggestions if OrderMap is open
     };
 
+
     // Update
     const startEditing = (order) => {
         setEditingId(order.id);
         setEditForm({ ...order });
     };
 
-    const saveEditing = async () => {
+    const saveEditing = async (confirmedStatus = null) => {
+        const orderToUpdate = confirmedStatus ? pendingShipment : editForm;
+        const currentEditingId = confirmedStatus ? pendingShipment.id : editingId;
+
+        const originalOrder = orders.find(o => o.id === currentEditingId);
+        const statusChangedToShipped = originalOrder && originalOrder.status !== 'Sevk Edildi' && orderToUpdate.status === 'Sevk Edildi';
+
+        // If status changed to shipped but not yet confirmed via modal
+        if (statusChangedToShipped && !confirmedStatus) {
+            setPendingShipment({ ...orderToUpdate });
+            return;
+        }
+
+        // If status is being set to "Sevk Edildi", ensure delivery date is set.
+        let finalForm = { ...orderToUpdate };
+        if (statusChangedToShipped && !finalForm.delivery_date) {
+            finalForm.delivery_date = new Date().toISOString().split('T')[0];
+        }
+
+        const toastId = toast.loading("Sipariş güncelleniyor...");
         try {
-            await api.put(`/customer-orders/${editingId}`, {
-                id: editingId,
-                amount: parseFloat(editForm.amount),
-                status: editForm.status,
-                expected_delivery_date: editForm.expected_delivery_date,
-                delivery_date: editForm.delivery_date,
-                production_time_days: parseInt(editForm.production_time_days)
+            // Update the order - Backend handles shipping logic automatically
+            const response = await api.put(`/customer-orders/${currentEditingId}`, {
+                id: currentEditingId,
+                amount: parseFloat(finalForm.amount),
+                status: finalForm.status,
+                expected_delivery_date: finalForm.expected_delivery_date,
+                delivery_date: finalForm.delivery_date,
+                production_time_days: parseInt(finalForm.production_time_days)
             });
+
+            // Check for warnings (this might be less common now for shipping)
+            if (response.data.warnings && response.data.warnings.length > 0) {
+                const missingItems = response.data.warnings
+                    .filter(w => w.type === "missing_supplier")
+                    .map(w => w.item_id);
+
+                if (missingItems.length > 0) {
+                    setMissingSuppliers(missingItems);
+                    setShowMissingSupplierModal(true);
+                }
+            }
+
+            toast.success("Sipariş başarıyla güncellendi.", { id: toastId });
             fetchOrders();
             setEditingId(null);
+            setPendingShipment(null);
         } catch (error) {
             console.error(error);
-            alert("Güncelleme hatası.");
+            toast.error("Güncelleme hatası: " + (error.response?.data?.detail || error.message), { id: toastId });
+            fetchOrders();
+            setPendingShipment(null);
         }
     };
 
     // Delete
     const handleDelete = async (id) => {
-        if (!window.confirm("Bu siparişi silmek istediğinize emin misiniz?")) return;
+        const toastId = toast.loading("Sipariş siliniyor...");
         try {
             await api.delete(`/customer-orders/${id}`);
+            toast.success("Sipariş başarıyla silindi.", { id: toastId });
             fetchOrders();
+            setDeleteModal({ isOpen: false, id: null });
         } catch (error) {
             console.error(error);
+            toast.error("Sipariş silinirken hata oluştu.", { id: toastId });
         }
     };
 
@@ -391,7 +479,8 @@ const CustomerOrders = () => {
             const search = filters.search.toLowerCase();
             const matchesSearch =
                 order.customer_name.toLowerCase().includes(search) ||
-                order.item_id.toLowerCase().includes(search);
+                order.item_id.toLowerCase().includes(search) ||
+                order.id.toString().includes(search);
             const matchesStatus = filters.status ? order.status === filters.status : true;
 
             let matchesDate = true;
@@ -441,9 +530,9 @@ const CustomerOrders = () => {
     if (loading) return <div className="p-8">Yükleniyor...</div>;
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="h-full flex flex-col gap-4 animate-in fade-in duration-300">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex-shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-2">
                         <Users className="text-blue-600" /> Müşteri Siparişleri
@@ -460,12 +549,12 @@ const CustomerOrders = () => {
             </div>
 
             {/* Filters ... (Keep Existing) */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex gap-4">
+            <div className="flex-shrink-0 bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input
                         type="text"
-                        placeholder="Müşteri veya Ürün Ara..."
+                        placeholder="Müşteri, Ürün veya Sipariş No Ara..."
                         className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                         value={filters.search}
                         onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
@@ -500,15 +589,22 @@ const CustomerOrders = () => {
                         onChange={(e) => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
                     />
                 </div>
+                <button
+                    onClick={handleClearFilters}
+                    className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium border border-gray-200 w-full md:w-auto"
+                >
+                    Temizle
+                </button>
             </div>
 
 
             {/* Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full" style={{ tableLayout: 'fixed' }}>
-                        <thead className="bg-gray-50 border-b border-gray-100">
+            <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col min-h-0 relative">
+                <div className="flex-1 overflow-y-auto w-full">
+                    <table className="w-full relative" style={{ tableLayout: 'fixed' }}>
+                        <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                             <tr>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase" style={{ width: '80px' }}>Sip. No</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase" style={{ width: '120px' }}>Müşteri</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase" style={{ width: '100px' }}>Ürün</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase" style={{ width: '80px' }}>Miktar</th>
@@ -525,6 +621,7 @@ const CustomerOrders = () => {
                                 const isEditing = editingId === order.id;
                                 return (
                                     <tr key={order.id} className={`hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-blue-50/30" : ""}`}>
+                                        <td className="px-6 py-4 text-sm font-bold text-gray-700">#{order.id}</td>
                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{order.customer_name}</td>
                                         <td className="px-6 py-4 text-sm text-gray-600">{order.item_id}</td>
                                         <td className="px-6 py-4 text-sm font-bold text-gray-700">
@@ -554,8 +651,11 @@ const CustomerOrders = () => {
                                         </td>
                                         <td className="px-6 py-4 text-sm">
                                             {isEditing ? (
-                                                <select className="border rounded px-1 py-0.5 text-xs"
-                                                    value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })}>
+                                                <select className="border rounded px-1 py-0.5 text-xs disabled:bg-gray-100 disabled:text-gray-500"
+                                                    value={editForm.status}
+                                                    onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                                                    disabled={order.status === 'Sevk Edildi'}
+                                                >
                                                     <option value="Bekleniyor">Bekleniyor</option>
                                                     <option value="Üretimde">Üretimde</option>
                                                     <option value="Hazır">Hazır</option>
@@ -565,7 +665,7 @@ const CustomerOrders = () => {
                                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                                                     ${order.status === 'Hazır' ? 'bg-green-100 text-green-800' :
                                                         order.status === 'Üretimde' ? 'bg-yellow-100 text-yellow-800' :
-                                                            order.status === 'Sevk Edildi' ? 'bg-gray-100 text-gray-600' :
+                                                            order.status === 'Sevk Edildi' ? 'bg-gray-200 text-gray-800' :
                                                                 'bg-blue-100 text-blue-800'}`}>
                                                     {order.status}
                                                 </span>
@@ -574,13 +674,19 @@ const CustomerOrders = () => {
                                         <td className="px-6 py-4 text-right text-sm">
                                             {isEditing ? (
                                                 <div className="flex justify-end gap-2">
-                                                    <button onClick={saveEditing} className="text-green-600 hover:text-green-800"><Edit2 size={16} /></button>
-                                                    <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-700"><X size={16} /></button>
+                                                    <button onClick={() => saveEditing()} className="text-green-600 hover:text-green-800" title="Kaydet"><Check size={16} /></button>
+                                                    <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-700" title="İptal"><X size={16} /></button>
                                                 </div>
                                             ) : (
-                                                <div className="flex justify-end gap-2">
-                                                    <button onClick={() => startEditing(order)} className="text-blue-600 hover:text-blue-800"><Edit2 size={16} /></button>
-                                                    <button onClick={() => handleDelete(order.id)} className="text-red-500 hover:text-red-700"><Trash2 size={16} /></button>
+                                                <div className="flex justify-end gap-3 items-center">
+                                                    {order.status !== 'Sevk Edildi' ? (
+                                                        <>
+                                                            <button onClick={() => startEditing(order)} className="text-blue-600 hover:text-blue-800" title="Düzenle"><Edit2 size={16} /></button>
+                                                            <button onClick={() => setDeleteModal({ isOpen: true, id: order.id })} className="text-red-500 hover:text-red-700" title="Sil"><Trash2 size={16} /></button>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-xs text-gray-500 font-medium pr-3">Kilitli</span>
+                                                    )}
                                                 </div>
                                             )}
                                         </td>
@@ -602,7 +708,15 @@ const CustomerOrders = () => {
                 </div>
             </div>
 
-            {isModalOpen && <NewCustomerOrderModal onClose={() => setIsModalOpen(false)} onSubmit={handleCreate} />}
+            {isModalOpen && <NewCustomerOrderModal onClose={() => setIsModalOpen(false)} onSubmit={handleCreate} orders={orders} />}
+
+            {/* Shipment Confirmation Popup */}
+            <ShippingConfirmModal
+                isOpen={!!pendingShipment}
+                order={pendingShipment || {}}
+                onConfirm={() => saveEditing(true)}
+                onCancel={() => setPendingShipment(null)}
+            />
 
             {/* Missing Supplier Warning Modal */}
             {showMissingSupplierModal && missingSuppliers.length > 0 && (
@@ -612,6 +726,15 @@ const CustomerOrders = () => {
                     onSaved={handleMissingSupplierSaved}
                 />
             )}
+            {/* Delete Confirmation Modal */}
+            <ConfirmModal
+                isOpen={deleteModal.isOpen}
+                onClose={() => setDeleteModal({ isOpen: false, id: null })}
+                onConfirm={() => handleDelete(deleteModal.id)}
+                title="Siparişi Sil"
+                message="Bu siparişi silmek istediğinize emin misiniz? Bu işlem geri alınamaz."
+                type="danger"
+            />
         </div >
     );
 };

@@ -1,5 +1,5 @@
 import pandas as pd
-from backend.database.db_helper import run_query, run_command
+from backend.database.db_helper import run_query, run_command, run_command_batch
 from backend.AI_ML import lightgbm
 from backend.crud import bom_explosion
 from backend.logger import get_logger
@@ -8,33 +8,6 @@ logger = get_logger(__name__)
 
 def calculate_safety_stock():
     logger.info("Safety Stock Calculation Orchestrator Started...")
-
-    # 1. Check Year Transition
-    # Get calculation year (from Prophet Forecasts which drive the AI model)
-    df_prophet_year = run_query("SELECT DISTINCT EXTRACT(YEAR FROM date) as year FROM prophet_table_temporary LIMIT 1")
-    
-    # Get current temporary data year
-    df_temp_year = run_query("SELECT DISTINCT EXTRACT(YEAR FROM date) as year FROM ss_ai_temporary LIMIT 1")
-
-    if not df_prophet_year.empty and not df_temp_year.empty:
-        calc_year = df_prophet_year.iloc[0]['year']
-        current_data_year = df_temp_year.iloc[0]['year']
-
-        logger.info(f"Calculation Year: {calc_year}, Current Temp Data Year: {current_data_year}")
-
-        if calc_year > current_data_year:
-            logger.warning(">>> Year Transition Detected! Moving current temp data to history...")
-            move_query = """
-            INSERT INTO ss_ai_history (item_id, date, amount)
-            SELECT item_id, date, amount FROM ss_ai_temporary
-            ON CONFLICT (item_id, date) DO NOTHING
-            """
-            run_command(move_query)
-            logger.info(">>> Data moved to history successfully.")
-        else:
-            logger.info(">>> Same year or older. Overwriting without history backup.")
-    else:
-        logger.info(">>> No existing data or no prophet forecast found. Proceeding with fresh calculation.")
 
     # 2. Run LightGBM Training & Prediction
     # This script will TRUNCATE ss_ai_temporary and fill it with new predictions
@@ -58,32 +31,26 @@ def approve_safety_stock_plan(approval_list):
     """
     from datetime import date
     
-    # 1. Delete records older/equal today (Future planning)
-    today_str = date.today().strftime("%Y-%m-%d")
-    run_command("DELETE FROM final_safety_stock WHERE date <= %s", (today_str,))
+    # 1. Update/Insert into final_safety_stock
+    # Only overwrites matching item_id and date, preserves other records.
     
-    # 2. Upsert Logic
-    sql_check = "SELECT 1 FROM final_safety_stock WHERE item_id = %s AND date = %s"
-    sql_update = "UPDATE final_safety_stock SET safety_stock = %s, item_quantity_type = %s WHERE item_id = %s AND date = %s"
-    sql_insert = "INSERT INTO final_safety_stock (item_id, date, safety_stock, item_quantity_type) VALUES (%s, %s, %s, %s)"
+    # 2. Batch Upsert (ON CONFLICT)
+    sql_upsert = """
+    INSERT INTO final_safety_stock (item_id, date, safety_stock, item_quantity_type)
+    VALUES (%s, %s, %s, %s)
+    ON CONFLICT (item_id, date) 
+    DO UPDATE SET safety_stock = EXCLUDED.safety_stock, item_quantity_type = EXCLUDED.item_quantity_type
+    """
     
-    count = 0
-    for item in approval_list:
-        # Pydantic model access via dot notation, or dict via get
-        # Assuming Pydantic object
-        i_id = item.item_id
-        d_date = item.date
-        amt = item.amount
-        qty_type = item.item_quantity_type
+    batch_data = [
+        (item.item_id, item.date, item.amount, item.item_quantity_type)
+        for item in approval_list
+    ]
+    
+    if batch_data:
+        run_command_batch(sql_upsert, batch_data)
         
-        exists_df = run_query(sql_check, (i_id, d_date))
-        if not exists_df.empty:
-            run_command(sql_update, (amt, qty_type, i_id, d_date))
-        else:
-            run_command(sql_insert, (i_id, d_date, amt, qty_type))
-        count += 1
-        
-    return count
+    return len(batch_data)
 
 def get_final_safety_stock(from_date):
     """Özet tabloyu çeker"""
@@ -96,8 +63,19 @@ def get_final_safety_stock(from_date):
     return run_query(sql, (from_date,))
 
 def get_calculated_safety_stock_temp():
-    """Hesaplanmış geçici AI tablosunu çeker"""
-    sql = "SELECT * FROM calculated_full_ss_ai_temp ORDER BY date, item_id"
+    """Hesaplanmış geçici AI tablosunu çeker, mükerrer kayıtları birleştirir"""
+    sql = """
+    SELECT 
+        item_id, 
+        date, 
+        ROUND(SUM(amount)::numeric, 2) as amount, 
+        MAX(status) as status, 
+        MAX(item_type) as item_type, 
+        MAX(item_quantity_type) as item_quantity_type
+    FROM calculated_full_ss_ai_temp 
+    GROUP BY item_id, date
+    ORDER BY date, item_id
+    """
     return run_query(sql)
 
 def get_kings_formula_results():
@@ -107,5 +85,10 @@ def get_kings_formula_results():
     FROM ss_kings_formula 
     GROUP BY item_id
     """
+    return run_query(sql)
+
+def get_all_active_safety_stock():
+    """Tüm aktif onaylanmış safety stock değerlerini çeker"""
+    sql = "SELECT item_id, date::text as active_date, safety_stock as active_safety_stock FROM final_safety_stock"
     return run_query(sql)
 

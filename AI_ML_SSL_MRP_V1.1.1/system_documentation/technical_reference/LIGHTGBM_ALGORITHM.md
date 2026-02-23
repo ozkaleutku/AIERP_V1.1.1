@@ -17,12 +17,11 @@ Modelin başarısı, ona verilen girdilerin (Features) kalitesine bağlıdır. S
 
 ### B. Tedarik Özellikleri (Supply Features)
 *   **`leadtime_avg`:** Tedarikçinin ortalama teslim süresi.
-*   **`leadtime_deviation`:** Tedarikçinin gecikme sapması. (Sapma ne kadar yüksekse risk o kadar büyüktür).
-*   **`supplier_score`:** Tedarikçinin güvenilirlik puanı.
+*   **`leadtime_deviation`:** Tedarikçinin gecikme sapması.
 
 ### C. Zaman Özellikleri (Temporal Features)
-*   **`month`:** Hangi aydayız? (Mevsimselliği yakalamak için).
-*   **`quarter`:** Yılın hangi çeyreği?
+*   **`month_sin`, `month_cos`:** Ay bilgisinin (1-12) döngüsel (cyclical) formatta temsili.
+*   **`year`:** Yıl bilgisi (Trend takibi için).
 
 ---
 
@@ -34,7 +33,7 @@ Model, **"İdeal Stok Seviyesi Ne Olmalı?"** sorusunu öğrenmeye çalışır.
 
 Model parametreleri:
 *   **`objective`:** 'regression' (Sayısal bir stok miktarı tahmin ediyoruz).
-*   **`metric`:** 'rmse' (Hata kareler ortalamasının karekökü - Hatayı minimize etmeye çalışır).
+*   **`metric`:** 'quantile' (Quantile Loss - Model, ortalama talebi değil, %95 ihtimalle yetecek maksimum stok ihtiyacını öğrenerek risk yönetimini hedefler).
 *   **`boosting`:** 'gbdt' (Gradient Boosting Decision Tree).
 
 ---

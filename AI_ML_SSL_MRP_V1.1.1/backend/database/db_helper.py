@@ -48,6 +48,9 @@ def get_db_connection():
                 return conn
     except Exception as e:
         logger.error(f"Connection Pool Error: {e}")
+        print(f"DEBUG: Connection Pool Error: {e}")
+    if not pg_pool:
+        print("DEBUG: pg_pool is None after init attempt")
     return None
 
 def release_db_connection(conn):
@@ -70,10 +73,12 @@ def run_query(query, params=None):
             return df
         except Exception as e:
             logger.error(f"Query Error: {e}")
-            return pd.DataFrame()
+            raise e  # Re-raise to let caller handle it (e.g., API error response)
         finally:
             release_db_connection(conn)
-    return pd.DataFrame()
+    # If no connection, maybe raise or return empty with log
+    logger.error("No DB connection available for query.")
+    raise Exception("Database connection failed")
 
 def run_command(command, params=None):
     """INSERT, UPDATE, DELETE komutları için"""

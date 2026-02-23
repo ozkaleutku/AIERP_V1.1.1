@@ -2,6 +2,25 @@ import { useState, useMemo, useEffect } from "react";
 import { Search, Filter, Layers, Calendar, ArrowLeft, Save, CheckCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
+import toast from "react-hot-toast";
+import ConfirmModal from "../components/ConfirmModal";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+
+const formatQuantity = (value, unit) => {
+    if (value == null) return "0";
+    const num = parseFloat(value);
+    if (isNaN(num)) return value;
+
+    if (unit && unit.toLowerCase() === "adet") {
+        return Math.round(num).toString();
+    }
+
+    const hasDecimals = num % 1 !== 0;
+    if (hasDecimals) {
+        return parseFloat(num.toFixed(4)).toString();
+    }
+    return num.toString();
+};
 
 const SafetyStockComparison = () => {
     const navigate = useNavigate();
@@ -11,9 +30,10 @@ const SafetyStockComparison = () => {
 
     const [filters, setFilters] = useState({
         itemId: "",
-        level: "",
         month: ""
     });
+
+    const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -26,12 +46,37 @@ const SafetyStockComparison = () => {
             setData(response.data);
 
             // Initialize comparison data structure
-            const initial = response.data.map(item => ({
-                ...item,
-                preference: "AI", // Default
-                manualInput: "",
-                finalAmount: item.amount // Default to AI amount
-            }));
+            const initial = response.data.map((item, index) => {
+                let preference = "AI";
+                let manualInput = "";
+                let finalAmount = item.amount;
+
+                if (item.active_safety_stock !== undefined && item.active_safety_stock !== null) {
+                    const activeVal = parseFloat(item.active_safety_stock) || 0;
+                    const aiVal = parseFloat(item.amount) || 0;
+                    const formVal = parseFloat(item.formula_result) || 0;
+
+                    if (Math.abs(activeVal - aiVal) < 0.001) {
+                        preference = "AI";
+                        finalAmount = item.amount;
+                    } else if (Math.abs(activeVal - formVal) < 0.001) {
+                        preference = "Formula";
+                        finalAmount = item.formula_result;
+                    } else {
+                        preference = "Manual";
+                        manualInput = activeVal;
+                        finalAmount = activeVal;
+                    }
+                }
+
+                return {
+                    ...item,
+                    ui_id: `v_${Date.now()}_${index}`, // Unique identifier for reliable indexing
+                    preference,
+                    manualInput,
+                    finalAmount
+                };
+            });
             setComparisonData(initial);
         } catch (error) {
             console.error("Error fetching safety stock data:", error);
@@ -39,6 +84,8 @@ const SafetyStockComparison = () => {
             setLoading(false);
         }
     };
+
+    // Removed availableLevels memo as it's no longer used
 
     const handlePreferenceChange = (index, value) => {
         const newData = [...comparisonData];
@@ -64,15 +111,15 @@ const SafetyStockComparison = () => {
     const filteredData = useMemo(() => {
         return comparisonData.filter(item => {
             const matchesId = item.item_id.toLowerCase().includes(filters.itemId.toLowerCase());
-            const matchesLevel = filters.level ? item.status === filters.level : true;
             const matchesMonth = filters.month ? item.date.startsWith(filters.month) : true;
-            return matchesId && matchesLevel && matchesMonth;
+            return matchesId && matchesMonth;
         });
     }, [comparisonData, filters]);
 
-    const handleApprove = async () => {
-        if (!window.confirm("Bu tabloyu 'Nihai Emniyet Stoğu' olarak kaydetmek istediğinize emin misiniz? (Önceki kayıtlar silinecektir)")) return;
+    // Infinite scroll hook
+    const { visibleData, hasMore, loaderRef, visibleCount, totalCount } = useInfiniteScroll(filteredData, filters);
 
+    const handleApprove = async () => {
         const payload = comparisonData.map(item => ({
             item_id: item.item_id,
             date: item.date,
@@ -80,20 +127,30 @@ const SafetyStockComparison = () => {
             item_quantity_type: item.item_quantity_type
         }));
 
+        const toastId = toast.loading("Emniyet stokları güncelleniyor...");
         try {
             await api.post("/safety-stock/approve", payload);
-            alert("Emniyet stokları başarıyla güncellendi!");
+            toast.success("Emniyet stokları başarıyla güncellendi!", { id: toastId });
             navigate("/safety-stock");
         } catch (error) {
             console.error("Approval error:", error);
-            alert("Onaylama sırasında hata oluştu.");
+            toast.error("Onaylama sırasında hata oluştu.", { id: toastId });
         }
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFilters(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleClearFilters = () => {
+        setFilters({ itemId: "", month: "" });
     };
 
     if (loading) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="h-[calc(100vh-theme(spacing.16))] flex flex-col space-y-6 animate-in fade-in duration-300 p-6">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -110,7 +167,7 @@ const SafetyStockComparison = () => {
                 </div>
                 <div>
                     <button
-                        onClick={handleApprove}
+                        onClick={() => setIsApproveConfirmOpen(true)}
                         className="flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
                     >
                         <Save size={20} />
@@ -120,15 +177,17 @@ const SafetyStockComparison = () => {
             </div>
 
             {/* Filters */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="relative">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 mb-6">
+                <div className="relative flex-1 w-full md:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input
                         type="text"
-                        list="compare-item-options"
-                        placeholder="Ürün Ara..."
+                        name="itemId"
+                        placeholder="Ürün Kodu Ara..."
+                        value={filters.itemId}
+                        onChange={handleInputChange}
                         className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                        onChange={(e) => setFilters(prev => ({ ...prev, itemId: e.target.value }))}
+                        list="compare-item-options"
                     />
                     <datalist id="compare-item-options">
                         {[...new Set(comparisonData.map(d => d.item_id))].map(id => (
@@ -137,38 +196,33 @@ const SafetyStockComparison = () => {
                     </datalist>
                 </div>
 
-                <div className="relative">
-                    <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <select
-                        className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all appearance-none"
-                        onChange={(e) => setFilters(prev => ({ ...prev, level: e.target.value }))}
-                    >
-                        <option value="">Tüm Seviyeler</option>
-                        <option value="Level 0">Level 0</option>
-                        <option value="Level 1">Level 1</option>
-                        <option value="Level 2">Level 2</option>
-                    </select>
-                </div>
-
-                <div className="relative">
+                <div className="relative w-full md:w-48">
                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input
                         type="month"
+                        name="month"
+                        value={filters.month}
+                        onChange={handleInputChange}
                         className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                        onChange={(e) => setFilters(prev => ({ ...prev, month: e.target.value }))}
                     />
                 </div>
+
+                <button
+                    onClick={handleClearFilters}
+                    className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium border border-gray-200 w-full md:w-auto"
+                >
+                    Temizle
+                </button>
             </div>
 
             {/* Comparison Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col min-h-0">
+                <div className="flex-1 overflow-y-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b border-gray-200">
+                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                             <tr>
                                 <th className="px-6 py-4">Tarih</th>
                                 <th className="px-6 py-4">Ürün</th>
-                                <th className="px-6 py-4">Seviye</th>
                                 <th className="px-6 py-4 bg-emerald-50 text-emerald-700 border-l border-emerald-100">AI Sonucu</th>
                                 <th className="px-6 py-4 bg-blue-50 text-blue-700 border-l border-blue-100">Formül</th>
                                 <th className="px-6 py-4 bg-orange-50 text-orange-700 border-l border-orange-100">Manuel Giriş</th>
@@ -177,33 +231,29 @@ const SafetyStockComparison = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredData.map((row, index) => {
-                                // Important: We need the index in the ORIGINAL array to update state correctly
-                                // But filteredData is a subset.
-                                // Instead of index mapping, let's find the item in comparisonData by unique key if possible.
-                                // However, simple mapping back is tricky if we don't have unique IDs. 
-                                // Since we iterate filteredData, let's look up the index in the original data. 
-                                // Better approach: Pass the actual item and find index. Or filteredData should be derived from comparisonData + indices?
-                                // Let's just use comparisonData.indexOf(row) which is safe since row objects are references.
-                                const realIndex = comparisonData.indexOf(row);
+                            {visibleData.map((row) => {
+                                // Use unique ui_id to find exact index in original array
+                                const realIndex = comparisonData.findIndex(
+                                    (d) => d.ui_id === row.ui_id
+                                );
 
                                 return (
-                                    <tr key={index} className="bg-white hover:bg-gray-50/50 transition-colors">
+                                    <tr key={row.ui_id} className="bg-white hover:bg-gray-50/50 transition-colors">
                                         <td className="px-6 py-4 text-gray-600">{row.date}</td>
                                         <td className="px-6 py-4 font-medium text-gray-900">{row.item_id}</td>
-                                        <td className="px-6 py-4 text-gray-500">{row.status}</td>
 
                                         <td className="px-6 py-4 font-bold text-emerald-600 bg-emerald-50/30 border-l border-emerald-100">
-                                            {row.amount} {row.item_quantity_type}
+                                            {formatQuantity(row.amount, row.item_quantity_type)} <span className="text-xs font-normal text-gray-500">{row.item_quantity_type}</span>
                                         </td>
 
                                         <td className="px-6 py-4 text-blue-700 bg-blue-50/30 border-l border-blue-100">
-                                            {row.formula_result || 0}
+                                            {formatQuantity(row.formula_result, row.item_quantity_type)}
                                         </td>
 
                                         <td className="px-6 py-4 bg-orange-50/30 border-l border-orange-100">
                                             <input
                                                 type="number"
+                                                step="any"
                                                 className="w-24 border border-orange-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none text-gray-700 bg-white"
                                                 value={row.manualInput}
                                                 onChange={(e) => handleManualChange(realIndex, e.target.value)}
@@ -224,7 +274,7 @@ const SafetyStockComparison = () => {
                                         </td>
 
                                         <td className="px-6 py-4 font-bold text-gray-900 bg-gray-50 border-l border-gray-200">
-                                            {row.finalAmount}
+                                            {formatQuantity(row.finalAmount, row.item_quantity_type)} <span className="text-xs font-normal text-gray-500">{row.item_quantity_type}</span>
                                         </td>
                                     </tr>
                                 );
@@ -238,8 +288,27 @@ const SafetyStockComparison = () => {
                             )}
                         </tbody>
                     </table>
+                    {/* Infinite scroll loader */}
+                    {hasMore && (
+                        <div ref={loaderRef} className="flex justify-center py-4">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                        </div>
+                    )}
+                    <div className="text-center text-sm text-gray-400 py-2">
+                        {visibleCount} / {totalCount} kayıt gösteriliyor
+                    </div>
                 </div>
             </div>
+
+            <ConfirmModal
+                isOpen={isApproveConfirmOpen}
+                onClose={() => setIsApproveConfirmOpen(false)}
+                onConfirm={handleApprove}
+                title="Emniyet Stoklarını Onayla"
+                message="Bu tabloyu 'Nihai Emniyet Stoğu' olarak kaydetmek istediğinize emin misiniz? (Önceki kayıtlar silinecektir)"
+                confirmText="Onayla ve Kaydet"
+                type="warning"
+            />
         </div>
     );
 };

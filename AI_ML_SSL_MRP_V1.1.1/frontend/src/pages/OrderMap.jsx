@@ -158,19 +158,31 @@ const OrderMap = () => {
 
     const SuggestionCard = ({ item, type }) => {
         const isSafetyStock = type === 'safety';
-        // Safety stock suggestions always have red background
-        const shouldHighlight = isSafetyStock;
+        const isError = item.status && item.status.includes('HATA');
+        const isDelayed = item.status === 'Gecikmiş';
+
+        // Priority: Error > Delayed > Safety Stock > Normal
+        let borderClass = 'border-gray-100 bg-white';
+        if (isError) borderClass = 'border-red-500 bg-red-50 ring-2 ring-red-200';
+        else if (isDelayed) borderClass = 'border-gray-300 bg-gray-100';
+        else if (isSafetyStock) borderClass = 'border-orange-200 bg-orange-50';
 
         return (
-            <div className={`p-5 rounded-xl border ${shouldHighlight ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-white'} shadow-sm hover:shadow-md transition-all`}>
+            <div className={`p-5 rounded-xl border ${borderClass} shadow-sm hover:shadow-md transition-all`}>
                 <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${type === 'production' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
-                            {type === 'production' ? <Factory size={20} /> : <ShieldCheck size={20} />}
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isError ? 'bg-red-100 text-red-600' : isDelayed ? 'bg-gray-200 text-gray-600' : type === 'production' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
+                            {isError ? <AlertTriangle size={20} /> : (type === 'production' ? <Factory size={20} /> : <ShieldCheck size={20} />)}
                         </div>
                         <div>
                             <h4 className="font-bold text-gray-900">{item.item_id}</h4>
-                            <p className="text-xs text-gray-500">{type === 'production' ? 'Üretim Gereksinimi' : 'Emniyet Stok İhlali'}</p>
+                            {isError ? (
+                                <p className="text-xs font-bold text-red-600">{item.status}</p>
+                            ) : isDelayed ? (
+                                <p className="text-xs font-bold text-gray-600">GECİKMİŞ SİPARİŞ</p>
+                            ) : (
+                                <p className="text-xs text-gray-500">{type === 'production' ? 'Üretim Gereksinimi' : 'Emniyet Stok İhlali'}</p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -182,11 +194,13 @@ const OrderMap = () => {
                     </div>
                     <div className="bg-white/50 p-2 rounded-lg">
                         <span className="text-gray-400 block text-xs">Tedarikçi</span>
-                        <span className="font-semibold text-gray-800 truncate">{item.supplier_id}</span>
+                        <span className={`font-semibold truncate ${item.supplier_id === 'Bilinmiyor' ? 'text-red-500 italic' : 'text-gray-800'}`}>
+                            {item.supplier_id}
+                        </span>
                     </div>
                 </div>
 
-                <div className="space-y-2 border-t border-gray-100 pt-3">
+                <div className="space-y-2 border-t border-black/5 pt-3">
                     <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 flex items-center gap-1"><Calendar size={12} /> Sipariş Tarihi:</span>
                         <span className="font-medium text-gray-700">

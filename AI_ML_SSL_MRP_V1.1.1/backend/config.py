@@ -13,7 +13,7 @@ load_dotenv()
 DB_CONFIG = {
     "dbname": os.getenv("DB_NAME", "AI_ML_SS_MRP"),
     "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "1234"),
+    "password": os.getenv("DB_PASSWORD", ""),
     "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432")
 }

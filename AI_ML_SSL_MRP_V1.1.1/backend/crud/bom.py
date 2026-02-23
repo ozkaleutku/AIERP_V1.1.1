@@ -1,9 +1,3 @@
-import sys
-import os
-
-# Add backend root to sys.path to allow absolute imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 from backend.database.db_helper import run_query, run_command
 import pandas as pd
 
@@ -67,9 +61,6 @@ def check_circular_dependency(target_child, current_parent, visited=None):
     
     if target_child == current_parent:
         return True
-        
-    if visited is None:
-        visited = set()
         
     if target_child in visited:
         return False # Already checked this path

@@ -1,7 +1,3 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 from backend.database.db_helper import run_query, run_command
 
 def get_forecast_data():
@@ -22,3 +18,12 @@ def update_forecast_data(item_id, date, amount):
     WHERE item_id = %s AND date = %s
     """
     return run_command(sql, (amount, item_id, date))
+
+def approve_forecast():
+    """Geçici tahmin verilerini history tablosuna taşır (Onaylama)."""
+    sql_transfer = """
+    INSERT INTO prophet_table_history (item_id, date, amount)
+    SELECT item_id, date, amount FROM prophet_table_temporary
+    ON CONFLICT (item_id, date) DO UPDATE SET amount = EXCLUDED.amount;
+    """
+    return run_command(sql_transfer)

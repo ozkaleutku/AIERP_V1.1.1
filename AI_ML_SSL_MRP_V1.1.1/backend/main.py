@@ -16,9 +16,8 @@ logger = get_logger(__name__)
 
 try:
     # Importing CRUD modules
-    # Not: run_query artık main.py içinde kullanılmıyor, sadece modüller üzerinden erişiliyor.
-    # sales modülü silindi, stock üzerinden yönetiliyor.
-    from backend.crud.customer_orders import CustomerOrderCreate, CustomerOrderUpdate
+    from backend.crud import item, bom, stock, supplier, purchase, safety_stock, customer_orders, forecast
+    from backend.crud.customer_orders import CustomerOrderCreate, CustomerOrderUpdate, CustomerOrderResponse
     from backend.simulation import sim_manager
     from backend.AI_ML import prophet
 except ImportError as e:
@@ -28,7 +27,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,7 +44,7 @@ class StockMovementCreate(BaseModel):
 class SupplierItemCreate(BaseModel):
     item_id: str
     supplier_id: str
-    given_leadtime: float = Field(..., gt=0)
+    given_leadtime: float = Field(..., ge=0)
     given_leadtime_deviation: float = Field(0, ge=0)
     lot_size: float = Field(0, ge=0)
     min_size: float = Field(0, ge=0)
@@ -56,7 +55,7 @@ class SupplierItemCreate(BaseModel):
 class SupplierItemUpdate(BaseModel):
     item_id: str
     supplier_id: str
-    given_leadtime: Optional[float] = Field(None, gt=0)
+    given_leadtime: Optional[float] = Field(None, ge=0)
     given_leadtime_deviation: Optional[float] = Field(None, ge=0)
     lot_size: Optional[float] = Field(None, ge=0)
     min_size: Optional[float] = Field(None, ge=0)
@@ -106,6 +105,15 @@ class BomCreate(BaseModel):
     amount: float = Field(..., gt=0)
     activity_status: str
 
+class ProductUpdate(BaseModel):
+    activity_status: Optional[str] = None
+    item_type: Optional[str] = None
+    item_quantity_type: Optional[str] = None
+
+class BomUpdate(BaseModel):
+    amount: Optional[float] = Field(None, gt=0)
+    activity_status: Optional[str] = None
+
 class SalesRecordCreate(BaseModel):
     item_id: str
     amount: float = Field(..., gt=0)
@@ -154,21 +162,11 @@ def get_products(
     status: Optional[str] = None
 ):
     try:
-        # Not: Pagination logic crud/item.py içinde yoktu, mecburen burada yapacağız 
-        # veya item.py search_items'a limit offset ekleyebilirdik.
-        # Zaman kazanmak için search_items kullanıp Pandas ile slice edebiliriz 
-        # (Veri az olduğu için sorun değil, ileride SQL'e taşınmalı).
-        
-        df = item.search_items(item_id=search, item_type=item_type, status=status)
-        
-        total = len(df)
-        start = (page - 1) * limit
-        end = start + limit
-        
-        sliced_df = df.iloc[start:end]
+        offset = (page - 1) * limit
+        df, total = item.search_items(item_id=search, item_type=item_type, status=status, limit=limit, offset=offset)
         
         return {
-            "data": sliced_df.to_dict(orient="records"),
+            "data": df.to_dict(orient="records"),
             "total": total,
             "page": page,
             "limit": limit,
@@ -191,13 +189,9 @@ def create_product(body: ProductCreate):
         handle_db_error(e)
 
 @app.put("/api/products/{item_id}")
-def update_product_endpoint(item_id: str, body: dict):
+def update_product_endpoint(item_id: str, body: ProductUpdate):
     try:
-        # body['min_buffer'] ve 'activity_status' gelebilir
-        min_buf = body.get('min_buffer')
-        status = body.get('activity_status')
-        
-        item.update_item(item_id, status=status, min_buffer=min_buf)
+        item.update_item(item_id, item_type=body.item_type, quantity_type=body.item_quantity_type, status=body.activity_status)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -243,13 +237,13 @@ def delete_bom(parent_id: str, child_id: str):
         handle_db_error(e)
 
 @app.put("/api/bom/{parent_id}/{child_id}")
-def update_bom(parent_id: str, child_id: str, body: dict):
+def update_bom(parent_id: str, child_id: str, body: BomUpdate):
     try:
         bom.update_bom_component(
             parent_id, 
             child_id, 
-            amount=body.get('amount'), 
-            status=body.get('activity_status', 'Aktif')
+            amount=body.amount, 
+            status=body.activity_status
         )
         return {"status": "success"}
     except Exception as e:
@@ -304,6 +298,16 @@ def update_supplier(body: SupplierItemUpdate):
     except Exception as e:
         handle_db_error(e)
 
+@app.delete("/api/suppliers/{item_id}/{supplier_id}")
+def delete_supplier_item(item_id: str, supplier_id: str):
+    try:
+        # Soft delete tercih edilir genelde ama endpoint'te opsiyonel olabilir
+        # Burada soft delete kullanalim
+        supplier.soft_delete_supplier_item(item_id, supplier_id)
+        return {"status": "success"}
+    except Exception as e:
+        handle_db_error(e)
+
 # ---------------------------------------------------------
 # 4. Stock Movement (refactored)
 # ---------------------------------------------------------
@@ -312,7 +316,12 @@ def get_stock_movements():
     try:
         # Default limit is 100 in crud
         df = stock.search_stock_movements(limit=100)
-        return df.to_dict(orient="records")
+        records = df.to_dict(orient="records")
+        for r in records:
+            for k, v in r.items():
+                if pd.isna(v):
+                    r[k] = None
+        return records
     except Exception as e:
         handle_db_error(e)
 
@@ -334,10 +343,21 @@ def create_stock_movement(body: StockMovementCreate):
 # 5. Inventory (Active Inventory) (refactored)
 # ---------------------------------------------------------
 @app.get("/api/inventory")
-def get_inventory():
+def get_inventory(
+    page: int = 1,
+    limit: int = 50,
+    search: Optional[str] = None
+):
     try:
-        df = stock.get_inventory_with_details()
-        return df.fillna("").to_dict(orient="records")
+        offset = (page - 1) * limit
+        df, total = stock.get_inventory_with_details(search=search, limit=limit, offset=offset)
+        return {
+            "data": df.fillna("").to_dict(orient="records"),
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "totalPages": (total + limit - 1) // limit if limit > 0 else 1
+        }
     except Exception as e:
         handle_db_error(e)
 
@@ -410,7 +430,6 @@ def edit_order_endpoint(body: OrderEdit):
 # ---------------------------------------------------------
 # 7. Demand Forecast
 # ---------------------------------------------------------
-from backend.crud import forecast
 
 @app.get("/api/forecast/temporary")
 def get_forecast():
@@ -441,28 +460,17 @@ def calculate_forecast():
         handle_db_error(e)
 
 @app.post("/api/forecast/approve")
-def approve_forecast():
+def approve_forecast_endpoint():
     try:
-        # Prophet logic transfer
-        from backend.database.db_helper import run_command
-        sql_transfer = """
-        INSERT INTO prophet_table_history (item_id, date, amount)
-        SELECT item_id, date, amount FROM prophet_table_temporary
-        ON CONFLICT (item_id, date) DO NOTHING;
-        """
-        run_command(sql_transfer)
+        forecast.approve_forecast()
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
 
 
 # ---------------------------------------------------------
-# 8. Sales History (Optional / Dead Code?)
+# 8. Sales History
 # ---------------------------------------------------------
-# Kullanıcı isteği: Sadece main ve crud kullanılacak, sales.py silindi.
-# Eğer frontend sales tablosu istiyorsa, sales_out_history üzerinden okuyabiliriz.
-# Ama yazma işlemi stock_movement trigger ile oluyor.
-# Manuel sales ekleme (stock movement harici) isteniyorsa:
 @app.get("/api/sales")
 def get_sales():
     try:
@@ -484,7 +492,7 @@ def create_sale(body: SalesRecordCreate):
 @app.put("/api/sales/{record_id}")
 def update_sale(record_id: int, body: SalesRecordUpdate):
     try:
-        stock.update_sales_record(record_id, body.amount, body.date)
+        stock.update_sales_record(record_id, body.item_id, body.amount, body.date)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -511,9 +519,7 @@ def get_safety_stock():
              if 'date' in df_final.columns:
                 df_final['date'] = df_final['date'].astype(str)
 
-        df_inv = stock.get_current_stock_dataframe() # Need this func in stock.py or just use get_inventory_with_details
-        # stock.get_inventory_with_details gives more info, let's use that
-        df_inv = stock.get_inventory_with_details()[['item_id', 'amount']] # rename 'amount' to 'current_stock'
+        df_inv = stock.get_inventory_with_details()[['item_id', 'amount']]
         df_inv.rename(columns={'amount': 'current_stock'}, inplace=True)
        
         if not df_final.empty:
@@ -539,17 +545,31 @@ def get_safety_stock_temporary():
             df_ai['date'] = df_ai['date'].astype(str)
             
         df_formula = safety_stock.get_kings_formula_results()
+        df_active = safety_stock.get_all_active_safety_stock()
         
         if not df_ai.empty:
             df_merged = df_ai.merge(df_formula, on='item_id', how='left')
             df_merged['formula_result'] = df_merged['formula_result'].fillna(0).round(2)
             
+            # Merge active safety stock for preference persistence
+            if not df_active.empty:
+                df_merged = df_merged.merge(df_active, left_on=['item_id', 'date'], right_on=['item_id', 'active_date'], how='left')
+            else:
+                df_merged['active_safety_stock'] = None
+                
             df_inv = stock.get_inventory_with_details()[['item_id', 'amount']]
             df_inv.rename(columns={'amount': 'current_stock'}, inplace=True)
 
             df_merged = df_merged.merge(df_inv, on='item_id', how='left')
             df_merged['current_stock'] = df_merged['current_stock'].fillna(0)
             
+            import numpy as np
+            
+            # Clean up active_date column if it was added
+            if 'active_date' in df_merged.columns:
+                df_merged.drop(columns=['active_date'], inplace=True)
+            
+            df_merged = df_merged.replace({np.nan: None})
             return df_merged.to_dict(orient="records")
             
         return []
@@ -601,6 +621,21 @@ def delete_customer_order_api(order_id: int):
     try:
         customer_orders.delete_customer_order(order_id)
         return {"status": "success"}
+    except Exception as e:
+        handle_db_error(e)
+
+@app.post("/api/ship-order/")
+def ship_order_api(order: CustomerOrderResponse):
+    try:
+        # Use the add_stock_movement function which now contains all the logic
+        stock.add_stock_movement(
+            item_id=order.item_id,
+            amount=order.amount,
+            purpose='satış_çıkışı',
+            date=order.delivery_date or date.today(),
+            order_id=order.id
+        )
+        return {"status": "success", "message": f"Order {order.id} shipped and stock updated."}
     except Exception as e:
         handle_db_error(e)
 

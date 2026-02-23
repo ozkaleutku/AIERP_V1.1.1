@@ -290,7 +290,13 @@ def create_tables():
             v_item_id VARCHAR(20);
             v_supplier_id VARCHAR(20);
         BEGIN
-            -- DELETE işleminde NEW yok, OLD kullanılmalı
+            -- UPDATE ile item_id veya supplier_id değiştiyse: HEM eski HEM yeni çift için hesapla
+            IF TG_OP = 'UPDATE' AND (OLD.item_id != NEW.item_id OR OLD.supplier_id != NEW.supplier_id) THEN
+                PERFORM _recalc_leadtime(OLD.item_id, OLD.supplier_id);
+                PERFORM _recalc_leadtime(NEW.item_id, NEW.supplier_id);
+                RETURN NEW;
+            END IF;
+
             IF TG_OP = 'DELETE' THEN
                 v_item_id := OLD.item_id;
                 v_supplier_id := OLD.supplier_id;
@@ -299,28 +305,34 @@ def create_tables():
                 v_supplier_id := NEW.supplier_id;
             END IF;
             
+            PERFORM _recalc_leadtime(v_item_id, v_supplier_id);
+            
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """,
+        
+        """
+        CREATE OR REPLACE FUNCTION _recalc_leadtime(p_item_id VARCHAR(20), p_supplier_id VARCHAR(20)) RETURNS VOID AS $$
+        BEGIN
             UPDATE supplier_item
             SET 
                 calculated_leadtime_avg = (
                     SELECT AVG(actual_coming_date - purchase_date)
                     FROM purchase
-                    WHERE item_id = v_item_id AND supplier_id = v_supplier_id
+                    WHERE item_id = p_item_id AND supplier_id = p_supplier_id
                     AND actual_coming_date IS NOT NULL AND purchase_date IS NOT NULL
                 ),
                 calculated_leadtime_deviation = (
                     SELECT STDDEV(actual_coming_date - purchase_date)
                     FROM purchase
-                    WHERE item_id = v_item_id AND supplier_id = v_supplier_id
+                    WHERE item_id = p_item_id AND supplier_id = p_supplier_id
                     AND actual_coming_date IS NOT NULL AND purchase_date IS NOT NULL
                 )
-            WHERE item_id = v_item_id AND supplier_id = v_supplier_id;
-            
-            -- DELETE'te OLD, diğerlerinde NEW döndür
-            IF TG_OP = 'DELETE' THEN
-                RETURN OLD;
-            ELSE
-                RETURN NEW;
-            END IF;
+            WHERE item_id = p_item_id AND supplier_id = p_supplier_id;
         END;
         $$ LANGUAGE plpgsql;
         """,
@@ -337,17 +349,24 @@ def create_tables():
         """
         CREATE OR REPLACE FUNCTION propagate_supplier_item_changes() RETURNS TRIGGER AS $$
         BEGIN
-            UPDATE ss_kings_formula
-            SET
-                leadtime_avg = CASE 
-                    WHEN NEW.calculated = TRUE THEN NEW.calculated_leadtime_avg 
-                    ELSE NEW.given_leadtime 
-                END,
-                leadtime_deviation = CASE 
-                    WHEN NEW.calculated = TRUE THEN NEW.calculated_leadtime_deviation 
-                    ELSE NEW.given_leadtime_deviation 
-                END
-            WHERE item_id = NEW.item_id AND supplier_id = NEW.supplier_id;
+            IF TG_OP = 'INSERT' THEN
+                INSERT INTO ss_kings_formula (item_id, supplier_id, activity_status)
+                VALUES (NEW.item_id, NEW.supplier_id, NEW.activity_status)
+                ON CONFLICT (item_id, supplier_id) DO NOTHING;
+            ELSIF TG_OP = 'UPDATE' THEN
+                UPDATE ss_kings_formula
+                SET
+                    leadtime_avg = CASE 
+                        WHEN NEW.calculated = TRUE THEN NEW.calculated_leadtime_avg 
+                        ELSE NEW.given_leadtime 
+                    END,
+                    leadtime_deviation = CASE 
+                        WHEN NEW.calculated = TRUE THEN NEW.calculated_leadtime_deviation 
+                        ELSE NEW.given_leadtime_deviation 
+                    END,
+                    activity_status = NEW.activity_status
+                WHERE item_id = NEW.item_id AND supplier_id = NEW.supplier_id;
+            END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -356,7 +375,7 @@ def create_tables():
         """
         DROP TRIGGER IF EXISTS trigger_propagate_supplier_changes ON supplier_item;
         CREATE TRIGGER trigger_propagate_supplier_changes
-        AFTER UPDATE ON supplier_item
+        AFTER INSERT OR UPDATE ON supplier_item
         FOR EACH ROW
         EXECUTE FUNCTION propagate_supplier_item_changes();
         """,
@@ -394,7 +413,7 @@ def create_tables():
         """,
         
         """
-        DROP TRIGGER IF EXISTS trigger_fetch_leadtime_values ON ss_kings_formula;
+        DROP TRIGGER IF EXISTS trigger_fetch_ss_parameters ON ss_kings_formula;
         CREATE TRIGGER trigger_fetch_ss_parameters
         BEFORE INSERT OR UPDATE ON ss_kings_formula
         FOR EACH ROW
@@ -427,10 +446,27 @@ def create_tables():
         """
         CREATE OR REPLACE FUNCTION log_sales_to_history() RETURNS TRIGGER AS $$
         BEGIN
-            IF NEW.purpose = 'satış_çıkışı' THEN
-                INSERT INTO sales_out_history (id, item_id, amount, date)
-                VALUES (NEW.id, NEW.item_id, NEW.amount, NEW.date)
-                ON CONFLICT (id) DO NOTHING;
+            -- On DELETE or UPDATE: remove old sales record if it was a sales movement
+            IF TG_OP IN ('DELETE', 'UPDATE') THEN
+                IF OLD.purpose = 'satış_çıkışı' THEN
+                    DELETE FROM sales_out_history WHERE id = OLD.id;
+                END IF;
+            END IF;
+
+            -- On INSERT or UPDATE: add new sales record if it is a sales movement
+            IF TG_OP IN ('INSERT', 'UPDATE') THEN
+                IF NEW.purpose = 'satış_çıkışı' THEN
+                    INSERT INTO sales_out_history (id, item_id, amount, date)
+                    VALUES (NEW.id, NEW.item_id, NEW.amount, NEW.date)
+                    ON CONFLICT (id) DO UPDATE SET 
+                        item_id = EXCLUDED.item_id, 
+                        amount = EXCLUDED.amount, 
+                        date = EXCLUDED.date;
+                END IF;
+            END IF;
+
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
             END IF;
             RETURN NEW;
         END;
@@ -440,12 +476,12 @@ def create_tables():
         """
         DROP TRIGGER IF EXISTS trigger_log_sales ON stock_movement;
         CREATE TRIGGER trigger_log_sales
-        AFTER INSERT ON stock_movement
+        AFTER INSERT OR UPDATE OR DELETE ON stock_movement
         FOR EACH ROW
         EXECUTE FUNCTION log_sales_to_history();
         """,
         
-        # 16. Dynamic Demand Calc (Item Type Based)
+        # 16. Dynamic Demand Calc (Item Type Based) + Helper Function
         """
         CREATE OR REPLACE FUNCTION update_item_demand_stats() RETURNS TRIGGER AS $$
         DECLARE
@@ -454,38 +490,67 @@ def create_tables():
             avg_val DECIMAL(10, 2);
             std_val DECIMAL(10, 2);
         BEGIN
-            target_item_id := NEW.item_id;
+            -- On UPDATE with item_id change: recalculate BOTH old and new items
+            IF TG_OP = 'UPDATE' AND OLD.item_id != NEW.item_id THEN
+                -- 1. Recalculate OLD item's demand (reverse old effect)
+                PERFORM _recalc_demand(OLD.item_id);
+                -- 2. Recalculate NEW item's demand (apply new effect)
+                PERFORM _recalc_demand(NEW.item_id);
+                RETURN NEW;
+            END IF;
+
+            -- Standard: pick the right item_id
+            IF TG_OP = 'DELETE' THEN
+                target_item_id := OLD.item_id;
+            ELSE
+                target_item_id := NEW.item_id;
+            END IF;
             
-            SELECT item_type INTO item_t FROM item WHERE item_id = target_item_id;
+            PERFORM _recalc_demand(target_item_id);
+            
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """,
+        
+        """
+        CREATE OR REPLACE FUNCTION _recalc_demand(p_item_id VARCHAR(20)) RETURNS VOID AS $$
+        DECLARE
+            item_t item_type_enum;
+            avg_val DECIMAL(10, 2);
+            std_val DECIMAL(10, 2);
+        BEGIN
+            SELECT item_type INTO item_t FROM item WHERE item_id = p_item_id;
             
             IF item_t = 'hammadde' THEN
                 SELECT AVG(amount), STDDEV(amount) 
                 INTO avg_val, std_val
                 FROM purchase 
-                WHERE item_id = target_item_id;
+                WHERE item_id = p_item_id;
                 
             ELSIF item_t = 'mamül' THEN
                 SELECT AVG(amount), STDDEV(amount) 
                 INTO avg_val, std_val
                 FROM sales_out_history 
-                WHERE item_id = target_item_id;
+                WHERE item_id = p_item_id;
             
             ELSIF item_t = 'yarı_mamül' THEN
                 SELECT AVG(amount), STDDEV(amount) 
                 INTO avg_val, std_val
                 FROM stock_movement 
-                WHERE item_id = target_item_id AND purpose IN ('üretime_giden', 'satış_çıkışı');
+                WHERE item_id = p_item_id AND purpose IN ('üretime_giden', 'satış_çıkışı');
 
             ELSE
-                RETURN NEW;
+                RETURN;
             END IF;
             
             UPDATE item 
             SET demand_avg = COALESCE(avg_val, 0), 
                 demand_deviation = COALESCE(std_val, 0)
-            WHERE item_id = target_item_id;
-            
-            RETURN NEW;
+            WHERE item_id = p_item_id;
         END;
         $$ LANGUAGE plpgsql;
         """,
@@ -518,41 +583,47 @@ def create_tables():
         # 18. Trigger: Real-time Active Inventory Update AND Simulation Inventory Sync
         """
         CREATE OR REPLACE FUNCTION update_active_inventory() RETURNS TRIGGER AS $$
+        DECLARE
+            v_item_id VARCHAR(20);
+            v_amount DECIMAL(15, 4);
+            v_purpose VARCHAR(50);
+            v_delta DECIMAL(15, 4);
         BEGIN
-            -- Ensure item exists in active_inventory
-            INSERT INTO active_inventory (item_id, current_stock) 
-            VALUES (NEW.item_id, 0)
-            ON CONFLICT (item_id) DO NOTHING;
-            
-            -- Ensure item exists in sip_harita_active_inventory
-            INSERT INTO sip_harita_active_inventory (item_id, current_stock) 
-            VALUES (NEW.item_id, 0)
-            ON CONFLICT (item_id) DO NOTHING;
-            
-            -- Update stock based on movement purpose
-            IF NEW.purpose = 'giriş' THEN
-                -- Update Real Stock
-                UPDATE active_inventory 
-                SET current_stock = current_stock + NEW.amount 
-                WHERE item_id = NEW.item_id;
-                
-                -- Update Simulation Stock (Sync)
-                UPDATE sip_harita_active_inventory 
-                SET current_stock = current_stock + NEW.amount 
-                WHERE item_id = NEW.item_id;
-                
-            ELSIF NEW.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN
-                -- Update Real Stock
-                UPDATE active_inventory 
-                SET current_stock = current_stock - NEW.amount 
-                WHERE item_id = NEW.item_id;
-                
-                -- Update Simulation Stock (Sync)
-                UPDATE sip_harita_active_inventory 
-                SET current_stock = current_stock - NEW.amount 
-                WHERE item_id = NEW.item_id;
+            -- === PHASE 1: REVERSE OLD ROW (on UPDATE or DELETE) ===
+            IF TG_OP IN ('UPDATE', 'DELETE') THEN
+                IF OLD.purpose = 'giriş' THEN
+                    v_delta := -OLD.amount;  -- reverse an inbound
+                ELSIF OLD.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN
+                    v_delta := OLD.amount;   -- reverse an outbound
+                ELSE
+                    v_delta := 0;
+                END IF;
+
+                UPDATE active_inventory SET current_stock = current_stock + v_delta WHERE item_id = OLD.item_id;
+                UPDATE sip_harita_active_inventory SET current_stock = current_stock + v_delta WHERE item_id = OLD.item_id;
             END IF;
-            
+
+            -- === PHASE 2: APPLY NEW ROW (on INSERT or UPDATE) ===
+            IF TG_OP IN ('INSERT', 'UPDATE') THEN
+                -- Ensure item exists in both inventory tables
+                INSERT INTO active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0) ON CONFLICT (item_id) DO NOTHING;
+                INSERT INTO sip_harita_active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0) ON CONFLICT (item_id) DO NOTHING;
+
+                IF NEW.purpose = 'giriş' THEN
+                    v_delta := NEW.amount;
+                ELSIF NEW.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN
+                    v_delta := -NEW.amount;
+                ELSE
+                    v_delta := 0;
+                END IF;
+
+                UPDATE active_inventory SET current_stock = current_stock + v_delta WHERE item_id = NEW.item_id;
+                UPDATE sip_harita_active_inventory SET current_stock = current_stock + v_delta WHERE item_id = NEW.item_id;
+            END IF;
+
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -561,7 +632,7 @@ def create_tables():
         """
         DROP TRIGGER IF EXISTS trigger_update_active_inventory ON stock_movement;
         CREATE TRIGGER trigger_update_active_inventory
-        AFTER INSERT ON stock_movement
+        AFTER INSERT OR UPDATE OR DELETE ON stock_movement
         FOR EACH ROW
         EXECUTE FUNCTION update_active_inventory();
         """,
@@ -623,21 +694,41 @@ def create_tables():
         EXECUTE FUNCTION record_monthly_snapshot();
         """,
 
-        # 20. Trigger: Purchase -> Active Inventory Simulation Update
+        # 20. Trigger: Purchase -> Simulation Inventory (INSERT/UPDATE/DELETE)
         """
         CREATE OR REPLACE FUNCTION update_sim_inventory_on_purchase() RETURNS TRIGGER AS $$
         BEGIN
-            -- Ensure item exists in sip_harita_active_inventory
-            INSERT INTO sip_harita_active_inventory (item_id, current_stock) 
-            VALUES (NEW.item_id, 0)
-            ON CONFLICT (item_id) DO NOTHING;
-            
-            -- Increase stock on new purchase
-            UPDATE sip_harita_active_inventory 
-            SET current_stock = current_stock + NEW.amount 
-            WHERE item_id = NEW.item_id;
-            
-            RETURN NEW;
+            IF TG_OP = 'DELETE' THEN
+                -- Sipariş silindi: eklenen stoğu geri al
+                UPDATE sip_harita_active_inventory 
+                SET current_stock = current_stock - OLD.amount 
+                WHERE item_id = OLD.item_id;
+                RETURN OLD;
+                
+            ELSIF TG_OP = 'UPDATE' THEN
+                -- Eski etkiyi geri al
+                UPDATE sip_harita_active_inventory 
+                SET current_stock = current_stock - OLD.amount 
+                WHERE item_id = OLD.item_id;
+                
+                -- Yeni etkiyi uygula
+                INSERT INTO sip_harita_active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0)
+                ON CONFLICT (item_id) DO NOTHING;
+                
+                UPDATE sip_harita_active_inventory 
+                SET current_stock = current_stock + NEW.amount 
+                WHERE item_id = NEW.item_id;
+                RETURN NEW;
+                
+            ELSE -- INSERT
+                INSERT INTO sip_harita_active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0)
+                ON CONFLICT (item_id) DO NOTHING;
+                
+                UPDATE sip_harita_active_inventory 
+                SET current_stock = current_stock + NEW.amount 
+                WHERE item_id = NEW.item_id;
+                RETURN NEW;
+            END IF;
         END;
         $$ LANGUAGE plpgsql;
         """,
@@ -645,7 +736,7 @@ def create_tables():
         """
         DROP TRIGGER IF EXISTS trigger_sim_upt_purchase ON purchase;
         CREATE TRIGGER trigger_sim_upt_purchase
-        AFTER INSERT ON purchase
+        AFTER INSERT OR UPDATE OR DELETE ON purchase
         FOR EACH ROW
         EXECUTE FUNCTION update_sim_inventory_on_purchase();
         """
