@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import MissingSupplierPopup from "../components/MissingSupplierPopup";
 import ConfirmModal from "../components/ConfirmModal";
+import { matchTurkish } from "../utils/stringUtils";
 
 // New Order Modal
 const NewOrderModal = ({ onClose, onSubmit }) => {
@@ -268,10 +269,9 @@ const Orders = () => {
     // Filter Logic
     const filteredData = useMemo(() => {
         return orders.filter((order) => {
-            const search = filters.itemSupplier.toLowerCase();
             const matchesSearch =
-                order.item_id.toLowerCase().includes(search) ||
-                order.supplier_id.toLowerCase().includes(search);
+                matchTurkish(order.item_id, filters.itemSupplier) ||
+                matchTurkish(order.supplier_id, filters.itemSupplier);
 
             let matchesDate = true;
             if (filters.startDate || filters.endDate) {

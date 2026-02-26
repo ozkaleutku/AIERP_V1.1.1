@@ -3,6 +3,7 @@ import { Search, Edit2, CheckCircle2, XCircle, ArrowRightLeft, Factory, Truck, I
 import toast from "react-hot-toast";
 import api from "../api";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import { matchTurkish } from "../utils/stringUtils";
 
 const Inventory = () => {
     const [inventory, setInventory] = useState([]);
@@ -82,7 +83,7 @@ const Inventory = () => {
 
     const filteredData = useMemo(() => {
         if (!searchQuery) return inventory;
-        return inventory.filter(item => item.item_id.toLowerCase().includes(searchQuery.toLowerCase()));
+        return inventory.filter(item => matchTurkish(item.item_id, searchQuery));
     }, [inventory, searchQuery]);
 
     const stats = useMemo(() => {
@@ -315,7 +316,7 @@ const Inventory = () => {
             </div>
 
             {/* Right Sidebar - Active Orders (Collapsible) */}
-            <div className={`transition-all duration-300 ease-in-out border-l border-gray-200 bg-white flex flex-col h-full flex-shrink-0 relative ${isSidebarOpen ? 'w-80 opacity-100 p-4' : 'w-0 opacity-0 p-0 overflow-hidden border-none'}`}>
+            <div className={`bg-white border-l border-gray-200 transition-all duration-300 ease-in-out h-[calc(100vh-2rem)] sticky top-4 flex flex-col z-[60] ${isSidebarOpen ? 'w-80 p-4 opacity-100' : 'w-0 p-0 opacity-0 overflow-hidden border-none'}`}>
                 <div className="flex items-center justify-between mb-4 min-w-[280px] flex-shrink-0">
                     <div className="flex items-center gap-2">
                         <Factory className="text-blue-600" size={20} />
@@ -361,7 +362,7 @@ const Inventory = () => {
             {!isSidebarOpen && (
                 <button
                     onClick={() => setIsSidebarOpen(true)}
-                    className="fixed right-0 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-2 rounded-l-lg shadow-lg hover:bg-blue-700 transition-colors z-40"
+                    className="fixed right-0 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-2 rounded-l-lg shadow-lg hover:bg-blue-700 transition-colors z-[60]"
                     title="Aktif Siparişleri Göster"
                 >
                     <Factory size={20} />

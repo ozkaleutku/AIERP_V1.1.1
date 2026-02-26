@@ -174,9 +174,10 @@ def get_simulation_suggestions():
                 # Calculate order_date: when to place the order to meet deadline
                 order_date = deadline - timedelta(days=int(leadtime))
             
-            # Skip if order_date is in the past (don't show past suggestions)
-            # if order_date < date.today():
-            #     continue
+            # 1 aydan daha eski sipariş önerilerini genel listeden tamamen çıkar/atma (Gösterilmesin)
+            one_month_ago = date.today() - timedelta(days=30)
+            if order_date < one_month_ago:
+                continue
             
             # Gecikmiş Sipariş Kontrolü
             if order_date < date.today():
@@ -245,9 +246,10 @@ def get_simulation_suggestions():
                 # Target Date = ss_date (Month Start)
                 order_date = ss_date - timedelta(days=int(leadtime))
                 
-                # Skip if order_date is in the past (don't show past suggestions)
-                # if order_date < date.today():
-                #     continue
+                # 1 aydan daha eski sipariş önerilerini genel listeden tamamen çıkar/atma
+                one_month_ago = date.today() - timedelta(days=30)
+                if order_date < one_month_ago:
+                    continue
 
                 status = "Öneri" if supplier_id != 'Bilinmiyor' else "HATA: Tedarikçi Yok"
                 if order_date < date.today():

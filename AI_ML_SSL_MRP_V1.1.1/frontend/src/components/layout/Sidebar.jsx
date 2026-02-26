@@ -1,6 +1,6 @@
-import { Home, ShoppingCart, ArrowRightLeft, TrendingUp, Package, Users, Layers, ShieldCheck, PackageCheck, History, Map } from "lucide-react";
+import { Home, ShoppingCart, ArrowRightLeft, TrendingUp, Package, Users, Layers, ShieldCheck, PackageCheck, History, Map, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export const SIDEBAR_ITEMS = [
     { name: "Anasayfa", icon: Home, path: "/", description: "Genel bakış ve sistem özeti." },
@@ -19,51 +19,48 @@ export const SIDEBAR_ITEMS = [
 
 const Sidebar = () => {
     const location = useLocation();
-
-    // Obfuscated Signature
-    const [sysInfo] = useState(() => ({
-        brand: atob("T3B0aVN0b2NrIEFJ"),
-        mail: atob("dXRrdW96a2FsZUBnbWFpbC5jb20=")
-    }));
-
-    // Anti-Tamper Check
-    useEffect(() => {
-        const sysCheck = setInterval(() => {
-            const sigElement = document.getElementById("sys-signature");
-            if (!sigElement || !sigElement.innerText.includes(atob("dXRrdW96a2FsZUBnbWFpbC5jb20="))) {
-                document.body.innerHTML = "<div style='display:flex;height:100vh;width:100vw;align-items:center;justify-content:center;background:#111827;color:#ef4444;font-family:sans-serif;font-size:24px;font-weight:bold;'>Sistem İhlali: Lisans İmzası Kaldırılamaz!</div>";
-            }
-        }, 3000);
-        return () => clearInterval(sysCheck);
-    }, []);
+    const [isCollapsed, setIsCollapsed] = useState(false);
 
     return (
-        <div className="h-screen w-56 bg-gray-900 text-white flex flex-col fixed left-0 top-0 border-r border-gray-800">
-            <div className="p-6 border-b border-gray-800">
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-                    MRP System
+        <div className={`h-screen bg-gray-900 text-white flex flex-col border-r border-gray-800 transition-all duration-300 relative shrink-0 z-50 ${isCollapsed ? 'w-20' : 'w-64'}`}>
+
+            {/* Toggle Button */}
+            <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="absolute -right-3 top-8 bg-gray-800 border border-gray-700 rounded-full p-1 hover:bg-gray-700 transition-colors z-50 text-gray-400 hover:text-white shadow-lg"
+            >
+                {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
+
+            <div className="p-6 border-b border-gray-800 shrink-0 h-[73px] flex items-center justify-center overflow-hidden">
+                <h1 className={`font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent transition-all duration-300 whitespace-nowrap ${isCollapsed ? 'text-xl' : 'text-2xl'}`}>
+                    {isCollapsed ? 'OS-AI' : 'OptiStock AI'}
                 </h1>
             </div>
 
-            <nav className="flex-1 overflow-y-auto py-4">
-                <ul className="space-y-1 px-3">
+            <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 custom-scrollbar">
+                <ul className="space-y-2 px-3">
                     {SIDEBAR_ITEMS.map((item) => {
                         const isActive = location.pathname === item.path;
                         return (
                             <li key={item.path}>
                                 <Link
                                     to={item.path}
-                                    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive
+                                    title={isCollapsed ? item.name : undefined}
+                                    className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-4 py-3 rounded-xl transition-all duration-200 group ${isActive
                                         ? "bg-blue-600 shadow-lg shadow-blue-500/20 text-white"
                                         : "text-gray-400 hover:bg-gray-800 hover:text-white"
                                         }`}
                                 >
                                     <item.icon
-                                        size={20}
-                                        className={`transition-colors ${isActive ? "text-white" : "text-gray-400 group-hover:text-white"
-                                            }`}
+                                        size={22}
+                                        className={`shrink-0 transition-colors ${isActive ? "text-white" : "text-gray-400 group-hover:text-white"}`}
                                     />
-                                    <span className="font-medium">{item.name}</span>
+                                    {!isCollapsed && (
+                                        <span className="font-medium whitespace-nowrap overflow-hidden transition-all duration-300">
+                                            {item.name}
+                                        </span>
+                                    )}
                                 </Link>
                             </li>
                         );
@@ -71,14 +68,17 @@ const Sidebar = () => {
                 </ul>
             </nav>
 
-            <div className="p-4 border-t border-gray-800">
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/50" id="sys-signature">
-                    {/* Avatar removed as requested */}
-                    <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{sysInfo.brand}</p>
-                        <p className="text-xs text-gray-400 truncate">{sysInfo.mail}</p>
+            <div className={`p-4 border-t border-gray-800 flex flex-col items-center justify-center overflow-hidden shrink-0 transition-all duration-300 ${isCollapsed ? 'h-24 py-2' : ''}`}>
+                {!isCollapsed ? (
+                    <div id="sys-signature" className="text-center w-full">
+                        <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Developed By</p>
+                        <p className="text-xs font-semibold text-gray-400 font-mono tracking-wide truncate">utku altan özkale</p>
                     </div>
-                </div>
+                ) : (
+                    <div className="text-[10px] font-bold text-gray-500 rotate-[-90deg] whitespace-nowrap tracking-widest h-full flex items-center">
+                        U.A.Ö.
+                    </div>
+                )}
             </div>
         </div>
     );

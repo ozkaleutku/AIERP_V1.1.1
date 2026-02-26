@@ -3,6 +3,7 @@ import { Search, Filter, Plus, Calendar as CalendarIcon, Edit2, X, Trash2, Users
 import api from "../api";
 import toast from "react-hot-toast";
 import ConfirmModal from "../components/ConfirmModal";
+import { matchTurkish } from "../utils/stringUtils";
 
 const BATCH_SIZE = 30; // Number of rows to load per batch
 
@@ -476,11 +477,10 @@ const CustomerOrders = () => {
     // Filter Logic
     const filteredOrders = useMemo(() => {
         return orders.filter(order => {
-            const search = filters.search.toLowerCase();
             const matchesSearch =
-                order.customer_name.toLowerCase().includes(search) ||
-                order.item_id.toLowerCase().includes(search) ||
-                order.id.toString().includes(search);
+                matchTurkish(order.customer_name, filters.search) ||
+                matchTurkish(order.item_id, filters.search) ||
+                matchTurkish(order.id.toString(), filters.search);
             const matchesStatus = filters.status ? order.status === filters.status : true;
 
             let matchesDate = true;
