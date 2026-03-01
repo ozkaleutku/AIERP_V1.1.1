@@ -47,10 +47,19 @@ const NewCustomerOrderModal = ({ onClose, onSubmit, orders = [] }) => {
             toast.error("Miktar 0'dan büyük olmalıdır!");
             return;
         }
+        const prodDays = parseInt(formData.production_time_days);
+        if (prodDays < 0) {
+            toast.error("Üretim süresi negatif olamaz!");
+            return;
+        }
+        if (formData.order_date && formData.expected_delivery_date && formData.expected_delivery_date < formData.order_date) {
+            toast.error("Beklenen teslim tarihi, sipariş tarihinden önce olamaz!");
+            return;
+        }
         onSubmit({
             ...formData,
             amount: parsedAmount,
-            production_time_days: parseInt(formData.production_time_days) || 0,
+            production_time_days: prodDays || 0,
             expected_delivery_date: formData.expected_delivery_date || null,
             delivery_date: formData.delivery_date || null
         });
@@ -111,7 +120,7 @@ const NewCustomerOrderModal = ({ onClose, onSubmit, orders = [] }) => {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Üretim (Gün)</label>
-                            <input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            <input type="number" min="0" className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                 value={formData.production_time_days} onChange={e => setFormData({ ...formData, production_time_days: e.target.value })}
                                 placeholder="Örn: 5" />
                         </div>
@@ -155,124 +164,7 @@ const NewCustomerOrderModal = ({ onClose, onSubmit, orders = [] }) => {
     );
 };
 
-// Missing Supplier Warning Modal
-const MissingSupplierModal = ({ items, onClose, onSaved }) => {
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [formData, setFormData] = useState({
-        supplier_id: "",
-        given_leadtime: 7,
-        given_leadtime_deviation: 2,
-        lot_size: 1,
-        min_size: 1,
-        max_size: 1000,
-        calculated: false,
-        status: "Aktif"
-    });
-    const [saving, setSaving] = useState(false);
 
-    const currentItem = items[currentIndex];
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setSaving(true);
-        try {
-            await api.post("/suppliers", {
-                item_id: currentItem,
-                ...formData
-            });
-
-            if (currentIndex < items.length - 1) {
-                // Move to next item
-                setCurrentIndex(currentIndex + 1);
-                setFormData({ ...formData, supplier_id: "" }); // Reset supplier_id for next
-            } else {
-                // All done
-                onSaved();
-            }
-        } catch (error) {
-            console.error("Error adding supplier:", error);
-            toast.error("Tedarikçi eklenirken hata oluştu.");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6">
-                <div className="mb-4">
-                    <div className="flex items-center gap-2 text-amber-600 mb-2">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <h2 className="text-xl font-bold">Tedarikçi Bilgisi Gerekli</h2>
-                    </div>
-                    <p className="text-gray-600 text-sm">
-                        <strong className="text-gray-900">{currentItem}</strong> ürünü için aktif tedarikçi tanımlanmamış.
-                        Simülasyonun doğru çalışması için lütfen tedarikçi bilgilerini girin.
-                    </p>
-                    {items.length > 1 && (
-                        <p className="text-xs text-gray-400 mt-1">
-                            {currentIndex + 1} / {items.length} ürün
-                        </p>
-                    )}
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tedarikçi Kodu *</label>
-                        <input
-                            required
-                            type="text"
-                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                            value={formData.supplier_id}
-                            onChange={e => setFormData({ ...formData, supplier_id: e.target.value })}
-                            placeholder="Tedarikçi kodu girin"
-                        />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Temin Süresi (Gün)</label>
-                            <input
-                                type="number"
-                                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                value={formData.given_leadtime}
-                                onChange={e => setFormData({ ...formData, given_leadtime: parseFloat(e.target.value) || 0 })}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Sapma (Gün)</label>
-                            <input
-                                type="number"
-                                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                value={formData.given_leadtime_deviation}
-                                onChange={e => setFormData({ ...formData, given_leadtime_deviation: parseFloat(e.target.value) || 0 })}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
-                        >
-                            Şimdilik Atla
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={saving}
-                            className="flex-1 px-4 py-2 text-white bg-amber-600 hover:bg-amber-700 rounded-lg font-medium disabled:opacity-50"
-                        >
-                            {saving ? "Kaydediliyor..." : items.length > 1 && currentIndex < items.length - 1 ? "Kaydet ve Sonraki" : "Kaydet"}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
 
 const ShippingConfirmModal = ({ isOpen, onConfirm, onCancel, order }) => {
     if (!isOpen) return null;
@@ -320,9 +212,7 @@ const CustomerOrders = () => {
     });
     const [isModalOpen, setIsModalOpen] = useState(false);
 
-    // Missing supplier modal state
-    const [missingSuppliers, setMissingSuppliers] = useState([]);
-    const [showMissingSupplierModal, setShowMissingSupplierModal] = useState(false);
+
 
     // Shipment confirmation state
     const [pendingShipment, setPendingShipment] = useState(null);
@@ -370,17 +260,7 @@ const CustomerOrders = () => {
         try {
             const response = await api.post("/customer-orders", newOrder);
 
-            // Check for warnings (missing suppliers)
-            if (response.data.warnings && response.data.warnings.length > 0) {
-                const missingItems = response.data.warnings
-                    .filter(w => w.type === "missing_supplier")
-                    .map(w => w.item_id);
 
-                if (missingItems.length > 0) {
-                    setMissingSuppliers(missingItems);
-                    setShowMissingSupplierModal(true);
-                }
-            }
 
             toast.success("Müşteri siparişi oluşturuldu.");
             fetchOrders();
@@ -391,12 +271,7 @@ const CustomerOrders = () => {
         }
     };
 
-    // Handle missing supplier modal close
-    const handleMissingSupplierSaved = () => {
-        setShowMissingSupplierModal(false);
-        setMissingSuppliers([]);
-        // Optionally refresh suggestions if OrderMap is open
-    };
+
 
 
     // Update
@@ -436,17 +311,7 @@ const CustomerOrders = () => {
                 production_time_days: parseInt(finalForm.production_time_days)
             });
 
-            // Check for warnings (this might be less common now for shipping)
-            if (response.data.warnings && response.data.warnings.length > 0) {
-                const missingItems = response.data.warnings
-                    .filter(w => w.type === "missing_supplier")
-                    .map(w => w.item_id);
 
-                if (missingItems.length > 0) {
-                    setMissingSuppliers(missingItems);
-                    setShowMissingSupplierModal(true);
-                }
-            }
 
             toast.success("Sipariş başarıyla güncellendi.", { id: toastId });
             fetchOrders();
@@ -718,14 +583,7 @@ const CustomerOrders = () => {
                 onCancel={() => setPendingShipment(null)}
             />
 
-            {/* Missing Supplier Warning Modal */}
-            {showMissingSupplierModal && missingSuppliers.length > 0 && (
-                <MissingSupplierModal
-                    items={missingSuppliers}
-                    onClose={() => { setShowMissingSupplierModal(false); setMissingSuppliers([]); }}
-                    onSaved={handleMissingSupplierSaved}
-                />
-            )}
+
             {/* Delete Confirmation Modal */}
             <ConfirmModal
                 isOpen={deleteModal.isOpen}

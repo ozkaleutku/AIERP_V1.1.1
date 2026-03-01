@@ -102,7 +102,7 @@ const SafetyStock = () => {
     if (loading && !data.length) return <div className="p-6">Yükleniyor...</div>;
 
     return (
-        <div className="h-[calc(100vh-theme(spacing.16))] flex flex-col space-y-6 p-6">
+        <div className="h-full flex flex-col space-y-6">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>

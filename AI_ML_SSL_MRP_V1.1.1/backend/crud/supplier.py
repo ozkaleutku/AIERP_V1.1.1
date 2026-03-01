@@ -87,3 +87,23 @@ def hard_delete_supplier_item(item_id, supplier_id):
     """İlişkiyi veritabanından tamamen siler."""
     query = "DELETE FROM supplier_item WHERE item_id = %s AND supplier_id = %s"
     return run_command(query, (item_id, supplier_id))
+
+def get_missing_suppliers():
+    """
+    Sistemde kayıtlı ama aktif bir tedarikçisi olmayan ve tedarik edilmesi gereken ürünleri bulur.
+    (item_type 'mamül' olmayan ve aktif tedarikçisi bulunmayan ürünler)
+    """
+    query = """
+    SELECT i.item_id 
+    FROM item i
+    WHERE i.item_type != 'mamül' 
+    AND i.activity_status = 'Aktif'
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM supplier_item s 
+        WHERE s.item_id = i.item_id 
+        AND s.activity_status = 'Aktif'
+    )
+    """
+    df = run_query(query)
+    return df['item_id'].tolist() if not df.empty else []

@@ -50,10 +50,10 @@ const Home = () => {
     const dashboardItems = SIDEBAR_ITEMS.filter(item => item.path !== "/");
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="space-y-8 animate-in fade-in duration-500 h-full overflow-hidden">
             <div>
                 <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 bg-clip-text text-transparent">
-                    Hoş Geldiniz 👋
+                    Hoş Geldiniz
                 </h1>
                 <p className="text-gray-500 mt-2 text-lg">
                     AI Destekli Malzeme İhtiyaç Planlama Sistemi

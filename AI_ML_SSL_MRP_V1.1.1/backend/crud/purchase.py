@@ -20,6 +20,11 @@ def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_
     """
     Yeni bir satın alma siparişi oluşturur.
     """
+    from backend.crud.validations import validate_item_for_order
+    is_valid, error_msg = validate_item_for_order(item_id)
+    if not is_valid:
+        raise ValueError(error_msg)
+        
     sql = """
     INSERT INTO purchase (item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date)
     VALUES (%s, %s, %s, %s, %s, %s)

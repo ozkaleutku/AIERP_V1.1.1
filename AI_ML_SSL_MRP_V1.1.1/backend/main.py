@@ -262,6 +262,14 @@ def get_suppliers():
     except Exception as e:
         handle_db_error(e)
 
+@app.get("/api/suppliers/missing")
+def get_missing_suppliers_api():
+    try:
+        missing_items = supplier.get_missing_suppliers()
+        return {"missing_items": missing_items}
+    except Exception as e:
+        handle_db_error(e)
+
 @app.post("/api/suppliers")
 def create_supplier_item(body: SupplierItemCreate):
     try:

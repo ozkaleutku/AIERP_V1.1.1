@@ -73,12 +73,13 @@ const Bom = () => {
                 await api.post("/bom", itemData);
                 toast.success("BOM başarıyla oluşturuldu.");
             }
-            fetchBoms();
+            fetchBom();
             setShowAddForm(false);
-            setEditForm({}); // This line might be redundant if setShowAddForm(false) closes the form
+            setEditForm({});
         } catch (error) {
             console.error("Error saving BOM:", error);
-            toast.error(error.response?.data?.detail || "BOM kaydedilirken hata oluştu.");
+            // Re-throw so the form component can handle it (show inline error)
+            throw error;
         }
     };
 
@@ -90,7 +91,7 @@ const Bom = () => {
         try {
             await api.delete(`/bom/${parent_id}/${child_id}`);
             toast.success("BOM başarıyla silindi.", { id: toastId });
-            fetchBoms();
+            fetchBom();
             setDeleteConfirm(null);
         } catch (error) {
             console.error("Error deleting BOM:", error);
@@ -124,7 +125,7 @@ const Bom = () => {
             toast.success("BOM başarıyla güncellendi.", { id: toastId });
             setEditingId(null);
             setEditForm({});
-            fetchBoms();
+            fetchBom();
         } catch (error) {
             console.error("Error updating BOM:", error);
             toast.error(error.response?.data?.detail || "Güncelleme başarısız.", { id: toastId });
@@ -222,6 +223,7 @@ const Bom = () => {
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Miktar</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Birim</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Durum</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Pasife Çeken Ürün(ler)</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">İşlemler</th>
                             </tr>
                         </thead>
@@ -263,6 +265,15 @@ const Bom = () => {
                                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.activity_status === "Aktif" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
                                                     {item.activity_status}
                                                 </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-500">
+                                            {item.deactivated_by_item_ids ? (
+                                                <span className="text-red-600 text-xs font-medium px-2 py-1 bg-red-50 rounded-lg whitespace-nowrap">
+                                                    Nedeni: {item.deactivated_by_item_ids}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-400">-</span>
                                             )}
                                         </td>
                                         <td className="px-6 py-4 text-right text-sm font-medium">

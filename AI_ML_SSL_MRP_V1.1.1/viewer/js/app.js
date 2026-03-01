@@ -2,17 +2,17 @@
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     renderSidebar();
-    
+
     // Check URL params for initial page
     const params = new URLSearchParams(window.location.search);
     const page = params.get('page');
     const group = params.get('group');
-    
+
     if (page && group) {
         loadPage(group, page);
     } else {
         // Default to Home (Ana_Sayfa) or first available
-        loadPage('user_manuals', 'Ana_Sayfa');
+        loadPage('sistem_genel_bakis', 'MIMARI_YAKLASIM');
     }
 
     // Initialize Mermaid
@@ -36,7 +36,7 @@ function toggleTheme() {
     document.documentElement.setAttribute('data-theme', newTheme);
     localStorage.setItem('theme', newTheme);
     updateThemeIcon(newTheme);
-    
+
     // Re-render mermaid diagrams if any
     const mermaidDivs = document.querySelectorAll('.mermaid');
     if (mermaidDivs.length > 0) {
@@ -59,16 +59,16 @@ function renderSidebar() {
     navContainer.innerHTML = '';
 
     const groups = {
-        'root': 'General',
-        'user_manuals': 'User Manuals',
-        'technical_reference': 'Technical Reference'
+        'sistem_genel_bakis': 'Sistem Vizyonu',
+        'yapay_zeka_ve_algoritmalar': 'Akıllı Emniyet Optimizasyonu',
+        'operasyonel_kilavuz': 'Operasyon Merkezi'
     };
 
     for (const [key, label] of Object.entries(groups)) {
         if (docData[key] && Object.keys(docData[key]).length > 0) {
             const groupDiv = document.createElement('div');
             groupDiv.innerHTML = `<div class="nav-group-title">${label}</div>`;
-            
+
             Object.keys(docData[key]).sort().forEach(filename => {
                 const item = document.createElement('a');
                 item.className = 'nav-item';
@@ -78,7 +78,7 @@ function renderSidebar() {
                 item.dataset.page = filename;
                 groupDiv.appendChild(item);
             });
-            
+
             navContainer.appendChild(groupDiv);
         }
     }
@@ -119,10 +119,10 @@ function loadPage(group, filename) {
 
 function renderDatabaseSchema(content) {
     const contentDiv = document.getElementById('content');
-    
+
     // Create a special header and link to the graph view
     const html = marked.parse(content);
-    
+
     // Inject the button before the first mermaid diagram or at the top
     const buttonHtml = `
         <div style="margin: 20px 0; padding: 20px; background-color: var(--sidebar-bg); border-radius: 8px; border: 1px solid var(--border-color);">
@@ -133,7 +133,7 @@ function renderDatabaseSchema(content) {
     `;
 
     contentDiv.innerHTML = buttonHtml + html;
-    
+
     renderMermaid();
     hljs.highlightAll();
     document.getElementById('main').scrollTop = 0;
@@ -141,18 +141,18 @@ function renderDatabaseSchema(content) {
 
 async function renderMermaid() {
     const mermaidDivs = document.querySelectorAll('.mermaid');
-    
+
     // First pass: Convert code blocks to div.mermaid if they haven't been processed
     const codeBlocks = document.querySelectorAll('pre code.language-mermaid');
     codeBlocks.forEach(block => {
         const pre = block.parentElement;
         const div = document.createElement('div');
         div.className = 'mermaid';
-        
+
         // Strip out any hardcoded theme initialization to respect our UI theme
         let content = block.textContent;
         content = content.replace(/%%\{init:.*\}%%/g, '');
-        
+
         div.textContent = content;
         pre.replaceWith(div);
     });

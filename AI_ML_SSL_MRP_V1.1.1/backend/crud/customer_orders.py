@@ -43,6 +43,13 @@ def create_customer_order(order: CustomerOrderCreate):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     warnings = []
     
+    from backend.crud.validations import validate_item_for_order
+    is_valid, error_msg = validate_item_for_order(order.item_id)
+    if not is_valid:
+        cur.close()
+        release_db_connection(conn)
+        raise ValueError(error_msg)
+    
     try:
         cur.execute("""
             INSERT INTO customer_orders 

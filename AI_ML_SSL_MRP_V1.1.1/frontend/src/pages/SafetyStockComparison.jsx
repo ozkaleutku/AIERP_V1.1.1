@@ -150,7 +150,7 @@ const SafetyStockComparison = () => {
     if (loading) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
     return (
-        <div className="h-[calc(100vh-theme(spacing.16))] flex flex-col space-y-6 animate-in fade-in duration-300 p-6">
+        <div className="h-full flex flex-col space-y-6 animate-in fade-in duration-300">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>

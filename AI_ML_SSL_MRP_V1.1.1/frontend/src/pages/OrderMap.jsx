@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Map, AlertTriangle, Calendar, Search, Filter, CheckCircle2, Factory, ShieldCheck, X, RotateCcw } from 'lucide-react';
 import api from '../api';
 import toast from 'react-hot-toast';
-import MissingSupplierPopup from '../components/MissingSupplierPopup';
 import ConfirmModal from '../components/ConfirmModal';
 import { matchTurkish } from '../utils/stringUtils';
 
@@ -11,7 +10,6 @@ const BATCH_SIZE = 20; // Number of items to load per batch
 const OrderMap = () => {
     const [suggestions, setSuggestions] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [missingItems, setMissingItems] = useState([]); // For the popup
 
     // Delete Popup State
     const [deletePopupOpen, setDeletePopupOpen] = useState(false);
@@ -81,37 +79,13 @@ const OrderMap = () => {
             });
 
             setSuggestions(filteredRecent);
-
-            // Check for missing suppliers immediately
-            const missing = filteredRecent.filter(item =>
-                item.status && item.status.includes('HATA: Tedarikçi Yok')
-            );
-
-            // Remove duplicates based on item_id (we only need to define supplier once per item)
-            const uniqueMissing = [];
-            const seen = new Set();
-            for (const m of missing) {
-                if (!seen.has(m.item_id)) {
-                    seen.add(m.item_id);
-                    uniqueMissing.push(m);
-                }
-            }
-
-            if (uniqueMissing.length > 0) {
-                setMissingItems(uniqueMissing);
-            }
-
-        } catch (error) {
             console.error("Error fetching simulation data:", error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleMissingItemsComplete = () => {
-        setMissingItems([]); // Close popup
-        fetchSuggestions(); // Refresh data to see new order dates
-    };
+
 
     useEffect(() => {
         fetchSuggestions();
@@ -269,7 +243,7 @@ const OrderMap = () => {
     };
 
     return (
-        <div className="flex flex-col h-[calc(100vh-9rem)] animate-in fade-in duration-300">
+        <div className="flex flex-col h-full animate-in fade-in duration-300">
             {/* Sticky/Fixed Header & Filters Wrapper */}
             <div className="shrink-0 space-y-6 pb-6 pt-2 sticky top-0 bg-gray-50/95 backdrop-blur-sm z-20">
                 {/* Header */}
@@ -457,14 +431,7 @@ const OrderMap = () => {
                 confirmText="Sıfırla"
             />
 
-            {/* Missing Supplier Force Popup */}
-            {missingItems.length > 0 && (
-                <MissingSupplierPopup
-                    missingItems={missingItems}
-                    isOpen={true}
-                    onComplete={handleMissingItemsComplete}
-                />
-            )}
+
         </div>
     );
 };

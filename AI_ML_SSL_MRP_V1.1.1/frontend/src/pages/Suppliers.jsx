@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { Search, Filter, Plus, Edit2, X, Trash2, Globe, Phone, Mail, MapPin } from "lucide-react";
+import { Search, Filter, Plus, Edit2, X, Trash2, Globe, Phone, Mail, MapPin, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import api from "../api";
 import toast from "react-hot-toast";
 import ConfirmModal from "../components/ConfirmModal";
+import MissingSupplierPopup from '../components/MissingSupplierPopup';
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 // New Supplier Modal Component
@@ -204,6 +205,10 @@ const Suppliers = () => {
     const [editForm, setEditForm] = useState({});
     const [isModalOpen, setIsModalOpen] = useState(false);
 
+    // Missing Suppliers State
+    const [missingItems, setMissingItems] = useState([]);
+    const [showMissingPopup, setShowMissingPopup] = useState(false);
+
     // Confirmation State
     const [confirmModal, setConfirmModal] = useState({
         isOpen: false,
@@ -222,6 +227,7 @@ const Suppliers = () => {
     // Fetch Suppliers on Mount
     useEffect(() => {
         fetchSuppliers();
+        fetchMissingSuppliers();
     }, []);
 
     const fetchSuppliers = async () => {
@@ -233,6 +239,20 @@ const Suppliers = () => {
             console.error("Error fetching suppliers:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchMissingSuppliers = async () => {
+        try {
+            const response = await api.get("/suppliers/missing");
+            if (response.data && response.data.missing_items) {
+                // Return format is { missing_items: ["item1", "item2"] }
+                // Need to convert to objects for the popup: [{ item_id: "item1" }, ...]
+                const items = response.data.missing_items.map(itemId => ({ item_id: itemId }));
+                setMissingItems(items);
+            }
+        } catch (error) {
+            console.error("Error fetching missing suppliers:", error);
         }
     };
 
@@ -356,6 +376,25 @@ const Suppliers = () => {
 
     return (
         <div className="space-y-6 h-full flex flex-col">
+            {/* Missing Suppliers Notification Banner */}
+            {missingItems.length > 0 && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg shadow-sm flex items-center justify-between shrink-0 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center gap-3 text-red-700">
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                        <div>
+                            <h3 className="font-bold text-sm">Dikkat: Tedarikçisi eksik olan {missingItems.length} ürün bulundu.</h3>
+                            <p className="text-xs text-red-600/80 mt-0.5">Sipariş oluşturabilmek için ürünlere tedarikçi tanımlamalısınız.</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setShowMissingPopup(true)}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                    >
+                        Tedarikçileri Tanımla
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex justify-between items-center shrink-0">
                 <div>
@@ -612,6 +651,19 @@ const Suppliers = () => {
                 message={confirmModal.message}
                 type={confirmModal.type}
             />
+
+            {/* Missing Supplier Force Popup (Manual Trigger) */}
+            {showMissingPopup && missingItems.length > 0 && (
+                <MissingSupplierPopup
+                    missingItems={missingItems}
+                    isOpen={true}
+                    onComplete={() => {
+                        setShowMissingPopup(false);
+                        fetchSuppliers();
+                        fetchMissingSuppliers();
+                    }}
+                />
+            )}
         </div>
     );
 };

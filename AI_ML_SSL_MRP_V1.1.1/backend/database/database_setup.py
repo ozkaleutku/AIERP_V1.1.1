@@ -176,6 +176,7 @@ def create_tables():
             child_id VARCHAR(20) REFERENCES item(item_id),
             amount DECIMAL(12, 2),
             activity_status activity_status_enum,
+            deactivated_by_item_ids TEXT,
             PRIMARY KEY (parent_id, child_id)
         )
         """,

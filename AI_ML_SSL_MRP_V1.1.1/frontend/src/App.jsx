@@ -26,7 +26,7 @@ const PlaceholderPage = ({ title }) => (
 function App() {
   return (
     <BrowserRouter>
-      <Toaster position="top-right" />
+      <Toaster position="top-right" toastOptions={{ duration: 5000 }} />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
