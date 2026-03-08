@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle, Save, Truck, AlertTriangle, Factory } from 'lucide-react';
+import { AlertCircle, CheckCircle, Save, Truck, AlertTriangle, Factory, X } from 'lucide-react';
 import api from '../api';
 
 const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
@@ -127,12 +127,19 @@ const MissingSupplierPopup = ({ missingItems, onComplete, isOpen }) => {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-red-100 overflow-hidden relative">
 
                 {/* Header - Kırmızı Alarm */}
-                <div className="bg-red-50 p-6 border-b border-red-100">
+                <div className="bg-red-50 p-6 border-b border-red-100 relative">
+                    <button
+                        onClick={onComplete}
+                        className="absolute right-4 top-4 p-2 text-red-400 hover:text-red-700 hover:bg-red-100 rounded-full transition-all"
+                        title="Sonra Devam Et"
+                    >
+                        <X size={20} />
+                    </button>
                     <div className="flex items-start gap-4">
                         <div className="p-3 bg-red-100 text-red-600 rounded-full animate-pulse">
                             <AlertCircle size={32} />
                         </div>
-                        <div>
+                        <div className="pr-8">
                             <h2 className="text-xl font-bold text-gray-900">Eksik Tedarikçi Alarmı!</h2>
                             <p className="text-red-600 text-sm mt-1">
                                 Kritik! Sistemin devam etmesi için aşağıdaki malzemelere tedarikçi atamanız gerekiyor.

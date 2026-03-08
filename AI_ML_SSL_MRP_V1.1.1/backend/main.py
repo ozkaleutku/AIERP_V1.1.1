@@ -1,6 +1,6 @@
 import sys
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -16,10 +16,10 @@ logger = get_logger(__name__)
 
 try:
     # Importing CRUD modules
-    from backend.crud import item, bom, stock, supplier, purchase, safety_stock, customer_orders, forecast
+    from backend.crud import item, bom, stock, supplier, purchase, safety_stock, customer_orders, forecast, price_analytics, cost_calculation
     from backend.crud.customer_orders import CustomerOrderCreate, CustomerOrderUpdate, CustomerOrderResponse
     from backend.simulation import sim_manager
-    from backend.AI_ML import prophet
+    from backend.AI_ML import run_prophet
 except ImportError as e:
     logger.warning(f"Warning: Could not import local modules: {e}")
 
@@ -40,6 +40,11 @@ class StockMovementCreate(BaseModel):
     purpose: str
     date: Optional[str] = None
     order_id: Optional[int] = None
+    source_location_id: Optional[str] = None
+    target_location_id: Optional[str] = None
+    tracking_code: Optional[str] = None
+    parent_id: Optional[int] = None
+    is_completed: Optional[bool] = False
 
 class SupplierItemCreate(BaseModel):
     item_id: str
@@ -70,6 +75,7 @@ class OrderCreate(BaseModel):
     purpose: str
     purchase_date: str
     expected_coming_date: str
+    unit_price: Optional[float] = 0
 
 class OrderUpdate(BaseModel):
     id: int
@@ -83,10 +89,16 @@ class OrderEdit(BaseModel):
     purpose: Optional[str] = None
     purchase_date: Optional[str] = None
     expected_coming_date: Optional[str] = None
+    unit_price: Optional[float] = None
 
 class InventoryUpdate(BaseModel):
     item_id: str
+    location_id: str
     amount: float = Field(..., ge=0)
+class LocationResponse(BaseModel):
+    location_id: str
+    location_name: str
+    is_active: bool
 
 class ForecastUpdate(BaseModel):
     item_id: str
@@ -98,6 +110,10 @@ class ProductCreate(BaseModel):
     item_type: str
     item_quantity_type: str
     activity_status: str
+    unit_cost: Optional[float] = 0
+    unit_price: Optional[float] = 0
+    additional_cost: Optional[float] = 0
+    currency: Optional[str] = 'TRY'
 
 class BomCreate(BaseModel):
     parent_id: str
@@ -109,6 +125,10 @@ class ProductUpdate(BaseModel):
     activity_status: Optional[str] = None
     item_type: Optional[str] = None
     item_quantity_type: Optional[str] = None
+    unit_cost: Optional[float] = None
+    unit_price: Optional[float] = None
+    additional_cost: Optional[float] = None
+    currency: Optional[str] = None
 
 class BomUpdate(BaseModel):
     amount: Optional[float] = Field(None, gt=0)
@@ -118,17 +138,25 @@ class SalesRecordCreate(BaseModel):
     item_id: str
     amount: float = Field(..., gt=0)
     date: str
+    unit_price: Optional[float] = 0
 
 class SalesRecordUpdate(BaseModel):
     id: int
     item_id: Optional[str] = None
     amount: Optional[float] = Field(None, gt=0)
     date: Optional[str] = None
+    unit_price: Optional[float] = None
 
 class ApprovalItem(BaseModel):
     item_id: str
     date: str
     amount: float = Field(..., ge=0)
+    item_quantity_type: Optional[str] = None
+    preference: Optional[str] = "AI"
+
+class ForecastApprovalItem(BaseModel):
+    item_id: Optional[str] = None
+    date: Optional[str] = None
     item_quantity_type: Optional[str] = None
 
 # --- Helper for Graceful Error Handling ---
@@ -149,6 +177,14 @@ def handle_db_error(e):
 @app.get("/")
 def read_root():
     return {"message": "AI-Driven MRP System API is Running (Refactored)"}
+
+@app.get("/api/locations")
+def get_locations():
+    try:
+        df = stock.run_query("SELECT * FROM warehouse_location WHERE is_active = TRUE")
+        return df.to_dict(orient="records")
+    except Exception as e:
+        handle_db_error(e)
 
 # ---------------------------------------------------------
 # 1. Products (refactored)
@@ -176,31 +212,98 @@ def get_products(
         handle_db_error(e)
 
 @app.post("/api/products")
-def create_product(body: ProductCreate):
+def create_product(body: ProductCreate, background_tasks: BackgroundTasks):
     try:
         item.create_item(
             item_id=body.item_id,
             item_type=body.item_type,
             quantity_type=body.item_quantity_type,
-            status=body.activity_status
+            status=body.activity_status,
+            unit_cost=body.unit_cost or 0,
+            unit_price=body.unit_price or 0,
+            additional_cost=body.additional_cost or 0,
+            currency=body.currency or 'TRY'
         )
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
 
 @app.put("/api/products/{item_id}")
-def update_product_endpoint(item_id: str, body: ProductUpdate):
+def update_product_endpoint(item_id: str, body: ProductUpdate, background_tasks: BackgroundTasks):
     try:
-        item.update_item(item_id, item_type=body.item_type, quantity_type=body.item_quantity_type, status=body.activity_status)
+        item.update_item(
+            item_id, 
+            item_type=body.item_type, 
+            quantity_type=body.item_quantity_type, 
+            status=body.activity_status,
+            unit_cost=body.unit_cost,
+            unit_price=body.unit_price,
+            additional_cost=body.additional_cost,
+            currency=body.currency
+        )
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
 
-@app.delete("/api/products/{item_id}")
-def delete_product(item_id: str):
+# --- Price History ---
+@app.get("/api/products/{item_id}/price-history")
+def get_product_price_history(item_id: str):
     try:
-        item.hard_delete_item(item_id)
-        return {"status": "success"}
+        data = price_analytics.get_item_price_history(item_id)
+        return data
+    except Exception as e:
+        handle_db_error(e)
+
+@app.post("/api/products/recalculate-costs")
+def force_recalculate_costs(background_tasks: BackgroundTasks):
+    try:
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
+        return {"status": "Calculation started in background"}
+    except Exception as e:
+        handle_db_error(e)
+
+@app.get("/api/products/{item_id}/details")
+def get_product_analytics_details(item_id: str):
+    """
+    Unified endpoint for Product Analytics Hub.
+    Returns Price History, Safety Stock Comparison, and Demand Forecast.
+    """
+    try:
+        import numpy as np
+        
+        # 1. Price History
+        prices = price_analytics.get_item_price_history(item_id)
+        
+        # 2. Safety Stock Comparison
+        res_ss = safety_stock.get_safety_stock_detail(item_id)
+        df_ss = res_ss["predictions"]
+        ss_data = []
+        if not df_ss.empty:
+            df_ss['date'] = df_ss['date'].astype(str)
+            ss_data = df_ss.replace({np.nan: None}).to_dict(orient="records")
+            
+        # 3. Demand Forecast
+        res_forecast = forecast.get_item_forecast_detail(item_id)
+        df_f = res_forecast["forecast"]
+        df_s = res_forecast["sales_history"]
+        
+        forecast_data = []
+        if not df_f.empty:
+            df_f['date'] = df_f['date'].astype(str)
+            forecast_data = df_f.replace({np.nan: None}).to_dict(orient="records")
+            
+        sales_history = []
+        if not df_s.empty:
+            sales_history = df_s.replace({np.nan: None}).to_dict(orient="records")
+            
+        return {
+            "prices": prices,
+            "safety_stock": ss_data,
+            "forecast": forecast_data,
+            "sales_history": sales_history
+        }
     except Exception as e:
         handle_db_error(e)
 
@@ -216,7 +319,7 @@ def get_bom():
         handle_db_error(e)
 
 @app.post("/api/bom")
-def create_bom(body: BomCreate):
+def create_bom(body: BomCreate, background_tasks: BackgroundTasks):
     try:
         bom.add_bom_component(
             parent_id=body.parent_id,
@@ -224,20 +327,22 @@ def create_bom(body: BomCreate):
             amount=body.amount,
             status=body.activity_status
         )
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
 
 @app.delete("/api/bom/{parent_id}/{child_id}")
-def delete_bom(parent_id: str, child_id: str):
+def delete_bom(parent_id: str, child_id: str, background_tasks: BackgroundTasks):
     try:
         bom.hard_delete_bom_component(parent_id, child_id)
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
 
 @app.put("/api/bom/{parent_id}/{child_id}")
-def update_bom(parent_id: str, child_id: str, body: BomUpdate):
+def update_bom(parent_id: str, child_id: str, body: BomUpdate, background_tasks: BackgroundTasks):
     try:
         bom.update_bom_component(
             parent_id, 
@@ -245,6 +350,7 @@ def update_bom(parent_id: str, child_id: str, body: BomUpdate):
             amount=body.amount, 
             status=body.activity_status
         )
+        background_tasks.add_task(cost_calculation.recalculate_all_costs)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -336,13 +442,26 @@ def get_stock_movements():
 @app.post("/api/stock-movements")
 def create_stock_movement(body: StockMovementCreate):
     try:
-        stock.add_stock_movement(
+        res = stock.add_stock_movement(
             item_id=body.item_id,
             amount=body.amount,
             purpose=body.purpose,
             date=body.date,
-            order_id=body.order_id
+            order_id=body.order_id,
+            source_location_id=body.source_location_id,
+            target_location_id=body.target_location_id,
+            tracking_code=body.tracking_code,
+            parent_id=body.parent_id,
+            is_completed=body.is_completed or False
         )
+        return {"status": "success", "id": res}
+    except Exception as e:
+        handle_db_error(e)
+
+@app.post("/api/stock-movements/{movement_id}/complete")
+def complete_stock_movement(movement_id: int):
+    try:
+        stock.mark_movement_completed(movement_id)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -372,7 +491,7 @@ def get_inventory(
 @app.put("/api/inventory/update")
 def update_inventory(body: InventoryUpdate):
     try:
-        stock.update_active_inventory_amount(body.item_id, body.amount)
+        stock.update_active_inventory_amount(body.item_id, body.location_id, body.amount)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -397,7 +516,8 @@ def create_order_endpoint(body: OrderCreate):
             amount=body.amount,
             purpose=body.purpose,
             purchase_date=body.purchase_date,
-            expected_coming_date=body.expected_coming_date
+            expected_coming_date=body.expected_coming_date,
+            unit_price=body.unit_price or 0
         )
         return {"status": "success"}
     except Exception as e:
@@ -429,7 +549,8 @@ def edit_order_endpoint(body: OrderEdit):
             amount=body.amount,
             purpose=body.purpose,
             purchase_date=body.purchase_date,
-            expected_coming_date=body.expected_coming_date
+            expected_coming_date=body.expected_coming_date,
+            unit_price=body.unit_price
         )
         return {"status": "success"}
     except Exception as e:
@@ -461,17 +582,42 @@ def update_forecast_row(body: ForecastUpdate):
 @app.post("/api/forecast/calculate")
 def calculate_forecast():
     try:
-        prophet.run_full_analysis()
+        run_prophet.run_full_analysis()
 
         return {"status": "success", "message": "Calculation completed."}
     except Exception as e:
         handle_db_error(e)
 
 @app.post("/api/forecast/approve")
-def approve_forecast_endpoint():
+def approve_forecast_endpoint(item: Optional[ForecastApprovalItem] = None):
     try:
-        forecast.approve_forecast()
+        if item:
+            forecast.approve_forecast(item.item_id, item.date)
+        else:
+            forecast.approve_forecast()
         return {"status": "success"}
+    except Exception as e:
+        handle_db_error(e)
+
+@app.get("/api/forecast/detail/{item_id}")
+def get_forecast_detail(item_id: str):
+    try:
+        result = forecast.get_item_forecast_detail(item_id)
+        
+        df_forecast = result["forecast"]
+        df_sales = result["sales_history"]
+        
+        if not df_forecast.empty and 'date' in df_forecast.columns:
+            df_forecast['date'] = df_forecast['date'].astype(str)
+        
+        import numpy as np
+        forecast_data = df_forecast.replace({np.nan: None}).to_dict(orient="records") if not df_forecast.empty else []
+        sales_data = df_sales.replace({np.nan: None}).to_dict(orient="records") if not df_sales.empty else []
+        
+        return {
+            "forecast": forecast_data,
+            "sales_history": sales_data
+        }
     except Exception as e:
         handle_db_error(e)
 
@@ -492,7 +638,7 @@ def get_sales():
 @app.post("/api/sales")
 def create_sale(body: SalesRecordCreate):
     try:
-        stock.add_sales_record(body.item_id, body.amount, body.date)
+        stock.add_sales_record(body.item_id, body.amount, body.date, unit_price=body.unit_price or 0)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -500,7 +646,7 @@ def create_sale(body: SalesRecordCreate):
 @app.put("/api/sales/{record_id}")
 def update_sale(record_id: int, body: SalesRecordUpdate):
     try:
-        stock.update_sales_record(record_id, body.item_id, body.amount, body.date)
+        stock.update_sales_record(record_id, body.item_id, body.amount, body.date, unit_price=body.unit_price)
         return {"status": "success"}
     except Exception as e:
         handle_db_error(e)
@@ -564,6 +710,7 @@ def get_safety_stock_temporary():
                 df_merged = df_merged.merge(df_active, left_on=['item_id', 'date'], right_on=['item_id', 'active_date'], how='left')
             else:
                 df_merged['active_safety_stock'] = None
+                df_merged['active_preference'] = None
                 
             df_inv = stock.get_inventory_with_details()[['item_id', 'amount']]
             df_inv.rename(columns={'amount': 'current_stock'}, inplace=True)
@@ -597,6 +744,35 @@ def approve_safety_stock(approval_list: List[ApprovalItem]):
     try:
         count = safety_stock.approve_safety_stock_plan(approval_list)
         return {"status": "success", "count": count}
+    except Exception as e:
+        handle_db_error(e)
+
+@app.get("/api/safety-stock/detail/{item_id}")
+def get_ss_detail(item_id: str):
+    print(f"DEBUG: get_ss_detail called for {item_id}")
+    try:
+
+        result = safety_stock.get_safety_stock_detail(item_id)
+        
+        df_pred = result["predictions"]
+        df_sales = result["sales_history"]
+        
+        df_ai_history = result.get("ai_history", pd.DataFrame())
+        
+        if not df_pred.empty and 'date' in df_pred.columns:
+            df_pred['date'] = df_pred['date'].astype(str)
+            
+        import numpy as np
+        pred_data = df_pred.replace({np.nan: None}).to_dict(orient="records") if not df_pred.empty else []
+        sales_data = df_sales.replace({np.nan: None}).to_dict(orient="records") if not df_sales.empty else []
+        ai_history_data = df_ai_history.replace({np.nan: None}).to_dict(orient="records") if not df_ai_history.empty else []
+        
+        return {
+            "predictions": pred_data,
+            "sales_history": sales_data,
+            "ai_history": ai_history_data
+        }
+
     except Exception as e:
         handle_db_error(e)
 
@@ -667,4 +843,4 @@ def reset_simulation_api():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

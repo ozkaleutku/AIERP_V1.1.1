@@ -3,8 +3,10 @@ from psycopg2 import sql
 import sys
 import os
 
-# Add backend to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Correct sys.path to find 'backend' module
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
 from backend.config import DB_CONFIG
 from backend.logger import get_logger
@@ -27,13 +29,10 @@ def create_tables():
                 CREATE TYPE quantity_type_enum AS ENUM ('gram', 'adet', 'litre');
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'movement_purpose_enum') THEN
-                CREATE TYPE movement_purpose_enum AS ENUM ('üretime_giden', 'satış_çıkışı', 'giriş', 'çıkış');
+                CREATE TYPE movement_purpose_enum AS ENUM ('üretime_giden', 'satış_çıkışı', 'giriş', 'çıkış', 'iade');
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'purchase_purpose_enum') THEN
                 CREATE TYPE purchase_purpose_enum AS ENUM ('emniyet_stoku_için', 'acil_sipariş', 'normal_sipariş');
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'level_status_enum') THEN
-                CREATE TYPE level_status_enum AS ENUM ('Level 0', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Level 6', 'Level 7', 'Level 8', 'Level 9');
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'activity_status_enum') THEN
                 CREATE TYPE activity_status_enum AS ENUM ('Aktif', 'Pasif');
@@ -52,9 +51,39 @@ def create_tables():
             item_quantity_type quantity_type_enum,
             activity_status activity_status_enum,
             demand_avg DECIMAL(10, 2),
-            demand_deviation DECIMAL(10, 2)
+            demand_deviation DECIMAL(10, 2),
+            unit_cost DECIMAL(12, 2) DEFAULT 0,
+            unit_price DECIMAL(12, 2) DEFAULT 0,
+            additional_cost DECIMAL(12, 2) DEFAULT 0,
+            currency VARCHAR(5) DEFAULT 'TRY'
         )
         """,
+        # 1b. Update existing item table if columns missing (ERP Expansion)
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12, 2) DEFAULT 0",
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12, 2) DEFAULT 0",
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS additional_cost DECIMAL(12, 2) DEFAULT 0",
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS currency VARCHAR(5) DEFAULT 'TRY'",
+        
+        # 1c. item_price_history (Snapshots of item costs/prices)
+        """
+        CREATE TABLE IF NOT EXISTS item_price_history (
+            id SERIAL PRIMARY KEY,
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            unit_cost DECIMAL(12, 2),
+            unit_price DECIMAL(12, 2),
+            date DATE DEFAULT CURRENT_DATE,
+            UNIQUE (item_id, date)
+        )
+        """,
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'item_price_history_item_id_date_key') THEN
+                ALTER TABLE item_price_history ADD CONSTRAINT item_price_history_item_id_date_key UNIQUE (item_id, date);
+            END IF;
+        END$$;
+        """,
+        
         
         # 2. supplier_item (item tablosuna bağımlı)
         """
@@ -74,6 +103,26 @@ def create_tables():
         )
         """,
         
+        # 2.5. warehouse_location
+        """
+        CREATE TABLE IF NOT EXISTS warehouse_location (
+            location_id VARCHAR(50) PRIMARY KEY,
+            location_name VARCHAR(100),
+            is_active BOOLEAN DEFAULT TRUE
+        )
+        """,
+        # Seed default locations
+        """
+        INSERT INTO warehouse_location (location_id, location_name)
+        VALUES 
+            ('GİRİŞ_KALİTE', 'Giriş Kalite Kontrol'),
+            ('ANA_DEPO', 'Ana Depo'),
+            ('ÜRETİM', 'Üretim Sahası'),
+            ('ÇIKIŞ_KALİTE', 'Çıkış Kalite Kontrol'),
+            ('SEVKİYAT_DEPO', 'Sevkiyat Alanı')
+        ON CONFLICT (location_id) DO NOTHING;
+        """,
+
         # 3. stock_movement
         """
         CREATE TABLE IF NOT EXISTS stock_movement (
@@ -81,9 +130,22 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             amount DECIMAL(12, 2),
             purpose movement_purpose_enum,
-            date DATE
+            date DATE,
+            source_location_id VARCHAR(50) REFERENCES warehouse_location(location_id),
+            target_location_id VARCHAR(50) REFERENCES warehouse_location(location_id),
+            tracking_code VARCHAR(100),
+            parent_id INTEGER REFERENCES stock_movement(id),
+            is_completed BOOLEAN DEFAULT FALSE,
+            order_id INTEGER
         )
         """,
+        # Expansion for existing tables
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS source_location_id VARCHAR(50) REFERENCES warehouse_location(location_id)",
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS target_location_id VARCHAR(50) REFERENCES warehouse_location(location_id)",
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS tracking_code VARCHAR(100)",
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES stock_movement(id)",
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE stock_movement ADD COLUMN IF NOT EXISTS order_id INTEGER",
         
         # 4. start_inventories
         """
@@ -101,9 +163,11 @@ def create_tables():
             id SERIAL PRIMARY KEY,
             item_id VARCHAR(20) REFERENCES item(item_id),
             amount DECIMAL(12, 2),
+            unit_price DECIMAL(12, 2) DEFAULT 0,
             date DATE
         )
         """,
+        "ALTER TABLE sales_out_history ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12, 2) DEFAULT 0",
         
         # 6. prophet_table_history
         """
@@ -111,6 +175,8 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
             amount DECIMAL(12, 2),
+            yhat_lower DECIMAL(12, 2),
+            yhat_upper DECIMAL(12, 2),
             PRIMARY KEY (item_id, date)
         )
         """,
@@ -121,6 +187,8 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
             amount DECIMAL(12, 2),
+            yhat_lower DECIMAL(12, 2),
+            yhat_upper DECIMAL(12, 2),
             PRIMARY KEY (item_id, date)
         )
         """,
@@ -151,6 +219,7 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             safety_stock DECIMAL(12, 2) DEFAULT 0,
             item_quantity_type quantity_type_enum,
+            preference VARCHAR(20) DEFAULT 'AI',
             date DATE,
             PRIMARY KEY (item_id, date)
         )
@@ -169,7 +238,17 @@ def create_tables():
         )
         """,
 
-        # 9.6. bom (Bill of Materials)
+        # 9.6. historical_consumption (BOM-exploded historical requirement)
+        """
+        CREATE TABLE IF NOT EXISTS historical_consumption (
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            date DATE,
+            amount DECIMAL(12, 2) DEFAULT 0,
+            PRIMARY KEY (item_id, date)
+        )
+        """,
+
+        # 9.7. bom (Bill of Materials)
         """
         CREATE TABLE IF NOT EXISTS bom (
             parent_id VARCHAR(20) REFERENCES item(item_id),
@@ -188,6 +267,7 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             supplier_id VARCHAR(20),
             amount DECIMAL(12, 2),
+            unit_price DECIMAL(12, 2) DEFAULT 0,
             purchase_date DATE,
             expected_coming_date DATE,
             actual_coming_date DATE,
@@ -202,13 +282,30 @@ def create_tables():
             FOREIGN KEY (item_id, supplier_id) REFERENCES supplier_item(item_id, supplier_id)
         )
         """,
+        "ALTER TABLE purchase ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12, 2) DEFAULT 0",
 
         # 11. Active Inventory Table
         """
         CREATE TABLE IF NOT EXISTS active_inventory (
-            item_id VARCHAR(20) PRIMARY KEY REFERENCES item(item_id),
-            current_stock DECIMAL(12, 2) DEFAULT 0
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            location_id VARCHAR(50) REFERENCES warehouse_location(location_id),
+            current_stock DECIMAL(12, 2) DEFAULT 0,
+            PRIMARY KEY (item_id, location_id)
         )
+        """,
+        # Migration for existing active_inventory
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'active_inventory') THEN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='active_inventory' AND column_name='location_id') THEN
+                    ALTER TABLE active_inventory ADD COLUMN location_id VARCHAR(50) REFERENCES warehouse_location(location_id);
+                    UPDATE active_inventory SET location_id = 'ANA_DEPO' WHERE location_id IS NULL;
+                    ALTER TABLE active_inventory DROP CONSTRAINT IF EXISTS active_inventory_pkey;
+                    ALTER TABLE active_inventory ADD PRIMARY KEY (item_id, location_id);
+                END IF;
+            END IF;
+        END$$;
         """,
 
         # 11.5. Müşteri Siparişleri (Customer Orders)
@@ -442,6 +539,33 @@ def create_tables():
         FOR EACH ROW
         EXECUTE FUNCTION propagate_item_demand_changes();
         """,
+
+        # 14.6 Price History Sync Logic
+        """
+        CREATE OR REPLACE FUNCTION propagate_item_price_changes() RETURNS TRIGGER AS $$
+        BEGIN
+            -- Log if it's a new item or if existing item's price/cost changed
+            IF (TG_OP = 'INSERT') OR 
+               (OLD.unit_cost IS DISTINCT FROM NEW.unit_cost) OR 
+               (OLD.unit_price IS DISTINCT FROM NEW.unit_price) THEN
+                INSERT INTO item_price_history (item_id, unit_cost, unit_price, date)
+                VALUES (NEW.item_id, NEW.unit_cost, NEW.unit_price, CURRENT_DATE)
+                ON CONFLICT (item_id, date) DO UPDATE SET
+                    unit_cost = EXCLUDED.unit_cost,
+                    unit_price = EXCLUDED.unit_price;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """,
+        
+        """
+        DROP TRIGGER IF EXISTS trigger_log_price_history ON item;
+        CREATE TRIGGER trigger_log_price_history
+        AFTER INSERT OR UPDATE OF unit_cost, unit_price ON item
+        FOR EACH ROW
+        EXECUTE FUNCTION propagate_item_price_changes();
+        """,
         
         # 15. Stock Movement Triggers (Auto-Log Sales)
         """
@@ -521,28 +645,51 @@ def create_tables():
         CREATE OR REPLACE FUNCTION _recalc_demand(p_item_id VARCHAR(20)) RETURNS VOID AS $$
         DECLARE
             item_t item_type_enum;
-            avg_val DECIMAL(10, 2);
-            std_val DECIMAL(10, 2);
+            avg_val DECIMAL(12, 2);
+            std_val DECIMAL(12, 2);
         BEGIN
             SELECT item_type INTO item_t FROM item WHERE item_id = p_item_id;
             
-            IF item_t = 'hammadde' THEN
-                SELECT AVG(amount), STDDEV(amount) 
+            IF item_t = 'hammadde' OR item_t = 'yarı_mamül' THEN
+                -- Net Consumption = Transfers to Production - Returns to Warehouse
+                SELECT AVG(daily_net), STDDEV(daily_net)
                 INTO avg_val, std_val
-                FROM purchase 
-                WHERE item_id = p_item_id;
+                FROM (
+                    SELECT date, SUM(
+                        CASE 
+                            WHEN target_location_id = 'ÜRETİM' THEN amount 
+                            WHEN source_location_id = 'ÜRETİM' THEN -amount 
+                            ELSE 0 
+                        END
+                    ) as daily_net
+                    FROM stock_movement
+                    WHERE item_id = p_item_id
+                    GROUP BY date
+                ) daily;
+                
+                -- If no movements yet, fallback to older purpose logic for semi-finished if needed
+                IF avg_val IS NULL AND item_t = 'yarı_mamül' THEN
+                     SELECT AVG(amount), STDDEV(amount) 
+                     INTO avg_val, std_val
+                     FROM stock_movement 
+                     WHERE item_id = p_item_id AND purpose IN ('üretime_giden', 'satış_çıkışı');
+                END IF;
                 
             ELSIF item_t = 'mamül' THEN
-                SELECT AVG(amount), STDDEV(amount) 
-                INTO avg_val, std_val
-                FROM sales_out_history 
-                WHERE item_id = p_item_id;
-            
-            ELSIF item_t = 'yarı_mamül' THEN
+                -- Sales from Warehouse to Shipping or External
                 SELECT AVG(amount), STDDEV(amount) 
                 INTO avg_val, std_val
                 FROM stock_movement 
-                WHERE item_id = p_item_id AND purpose IN ('üretime_giden', 'satış_çıkışı');
+                WHERE item_id = p_item_id 
+                AND (source_location_id = 'ANA_DEPO' AND (target_location_id = 'SEVKİYAT_DEPO' OR target_location_id IS NULL));
+                
+                -- Fallback to sales_out_history if no movements recorded yet
+                IF avg_val IS NULL THEN
+                    SELECT AVG(amount), STDDEV(amount) 
+                    INTO avg_val, std_val
+                    FROM sales_out_history 
+                    WHERE item_id = p_item_id;
+                END IF;
 
             ELSE
                 RETURN;
@@ -587,39 +734,68 @@ def create_tables():
         DECLARE
             v_item_id VARCHAR(20);
             v_amount DECIMAL(15, 4);
-            v_purpose VARCHAR(50);
-            v_delta DECIMAL(15, 4);
+            v_source VARCHAR(50);
+            v_target VARCHAR(50);
         BEGIN
             -- === PHASE 1: REVERSE OLD ROW (on UPDATE or DELETE) ===
             IF TG_OP IN ('UPDATE', 'DELETE') THEN
-                IF OLD.purpose = 'giriş' THEN
-                    v_delta := -OLD.amount;  -- reverse an inbound
-                ELSIF OLD.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN
-                    v_delta := OLD.amount;   -- reverse an outbound
-                ELSE
-                    v_delta := 0;
+                v_source := OLD.source_location_id;
+                v_target := OLD.target_location_id;
+                
+                -- Backward compatibility for purpose-based logic
+                IF v_source IS NULL AND v_target IS NULL THEN
+                    IF OLD.purpose = 'giriş' THEN v_target := 'ANA_DEPO';
+                    ELSIF OLD.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN v_source := 'ANA_DEPO';
+                    END IF;
                 END IF;
 
-                UPDATE active_inventory SET current_stock = current_stock + v_delta WHERE item_id = OLD.item_id;
-                UPDATE sip_harita_active_inventory SET current_stock = current_stock + v_delta WHERE item_id = OLD.item_id;
+                IF v_source IS NOT NULL THEN
+                    UPDATE active_inventory SET current_stock = current_stock + OLD.amount 
+                    WHERE item_id = OLD.item_id AND location_id = v_source;
+                END IF;
+                IF v_target IS NOT NULL THEN
+                    UPDATE active_inventory SET current_stock = current_stock - OLD.amount 
+                    WHERE item_id = OLD.item_id AND location_id = v_target;
+                END IF;
+                
+                -- Sip Harita (Total Inventory) - keep item_id based for now
+                IF v_target IS NOT NULL AND v_source IS NULL THEN -- Incoming
+                    UPDATE sip_harita_active_inventory SET current_stock = current_stock - OLD.amount WHERE item_id = OLD.item_id;
+                ELSIF v_source IS NOT NULL AND v_target IS NULL THEN -- Outgoing
+                    UPDATE sip_harita_active_inventory SET current_stock = current_stock + OLD.amount WHERE item_id = OLD.item_id;
+                END IF;
             END IF;
 
             -- === PHASE 2: APPLY NEW ROW (on INSERT or UPDATE) ===
             IF TG_OP IN ('INSERT', 'UPDATE') THEN
-                -- Ensure item exists in both inventory tables
-                INSERT INTO active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0) ON CONFLICT (item_id) DO NOTHING;
-                INSERT INTO sip_harita_active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0) ON CONFLICT (item_id) DO NOTHING;
-
-                IF NEW.purpose = 'giriş' THEN
-                    v_delta := NEW.amount;
-                ELSIF NEW.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN
-                    v_delta := -NEW.amount;
-                ELSE
-                    v_delta := 0;
+                v_source := NEW.source_location_id;
+                v_target := NEW.target_location_id;
+                
+                -- Backward compatibility
+                IF v_source IS NULL AND v_target IS NULL THEN
+                    IF NEW.purpose = 'giriş' THEN v_target := 'ANA_DEPO';
+                    ELSIF NEW.purpose IN ('üretime_giden', 'satış_çıkışı', 'çıkış') THEN v_source := 'ANA_DEPO';
+                    END IF;
                 END IF;
 
-                UPDATE active_inventory SET current_stock = current_stock + v_delta WHERE item_id = NEW.item_id;
-                UPDATE sip_harita_active_inventory SET current_stock = current_stock + v_delta WHERE item_id = NEW.item_id;
+                IF v_source IS NOT NULL THEN
+                    INSERT INTO active_inventory (item_id, location_id, current_stock) VALUES (NEW.item_id, v_source, 0) ON CONFLICT (item_id, location_id) DO NOTHING;
+                    UPDATE active_inventory SET current_stock = current_stock - NEW.amount 
+                    WHERE item_id = NEW.item_id AND location_id = v_source;
+                END IF;
+                IF v_target IS NOT NULL THEN
+                    INSERT INTO active_inventory (item_id, location_id, current_stock) VALUES (NEW.item_id, v_target, 0) ON CONFLICT (item_id, location_id) DO NOTHING;
+                    UPDATE active_inventory SET current_stock = current_stock + NEW.amount 
+                    WHERE item_id = NEW.item_id AND location_id = v_target;
+                END IF;
+
+                -- Sip Harita (Total Inventory)
+                INSERT INTO sip_harita_active_inventory (item_id, current_stock) VALUES (NEW.item_id, 0) ON CONFLICT (item_id) DO NOTHING;
+                IF v_target IS NOT NULL AND v_source IS NULL THEN -- Incoming
+                    UPDATE sip_harita_active_inventory SET current_stock = current_stock + NEW.amount WHERE item_id = NEW.item_id;
+                ELSIF v_source IS NOT NULL AND v_target IS NULL THEN -- Outgoing
+                    UPDATE sip_harita_active_inventory SET current_stock = current_stock - NEW.amount WHERE item_id = NEW.item_id;
+                END IF;
             END IF;
 
             IF TG_OP = 'DELETE' THEN

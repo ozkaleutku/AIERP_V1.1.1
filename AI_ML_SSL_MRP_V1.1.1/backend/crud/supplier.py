@@ -16,23 +16,33 @@ def add_supplier_item(item_id, supplier_id, given_leadtime, given_leadtime_devia
 def search_supplier_items(item_id=None, supplier_id=None, status=None):
     """
     Tedarikçi-Ürün ilişkilerini dinamik filtrelerle arar.
+    İlişkili ürünün birim maliyet ve para birimini de getirir.
     """
-    query = "SELECT * FROM supplier_item WHERE 1=1"
+    query = """
+    SELECT 
+        si.*, 
+        i.unit_cost, 
+        i.unit_price, 
+        i.currency
+    FROM supplier_item si
+    LEFT JOIN item i ON si.item_id = i.item_id
+    WHERE 1=1
+    """
     params = []
     
     if item_id:
-        query += " AND item_id = %s"
+        query += " AND si.item_id = %s"
         params.append(item_id)
         
     if supplier_id:
-        query += " AND supplier_id = %s"
+        query += " AND si.supplier_id = %s"
         params.append(supplier_id)
         
     if status:
-        query += " AND activity_status = %s"
+        query += " AND si.activity_status = %s"
         params.append(status)
         
-    query += " ORDER BY item_id, supplier_id"
+    query += " ORDER BY si.item_id, si.supplier_id"
     
     return run_query(query, tuple(params))
 

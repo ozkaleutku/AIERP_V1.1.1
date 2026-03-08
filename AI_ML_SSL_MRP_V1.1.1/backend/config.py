@@ -5,8 +5,9 @@ All database and environment configurations should be imported from here.
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file if it exists
-load_dotenv()
+# Load environment variables from .env file if it exists (absolute path for robust execution)
+dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path)
 
 # Database Configuration
 # Use environment variables for production, with sensible defaults for development

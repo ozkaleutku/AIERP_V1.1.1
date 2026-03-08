@@ -19,11 +19,25 @@ const StockMovement = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [activeOrders, setActiveOrders] = useState([]);
     const [products, setProducts] = useState([]);
+    const [locations, setLocations] = useState([]);
     const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
+    const [isProductionModalOpen, setIsProductionModalOpen] = useState(false);
     const [movementForm, setMovementForm] = useState({
         item_id: "",
         amount: "",
         purpose: "giriş",
+        order_id: "",
+        source_location_id: "GİRİŞ_KALİTE",
+        target_location_id: "ANA_DEPO",
+        tracking_code: "",
+        parent_id: "",
+        is_completed: false,
+        date: new Date().toISOString().split('T')[0]
+    });
+
+    const [productionForm, setProductionForm] = useState({
+        item_id: "",
+        amount: "",
         order_id: "",
         date: new Date().toISOString().split('T')[0]
     });
@@ -33,11 +47,44 @@ const StockMovement = () => {
         fetchMovements();
         fetchActiveOrders();
         fetchProducts();
+        fetchLocations();
 
-        // Polling for active orders (every 2 minutes) to keep sidebar updated without F5
+        // Polling for active orders
         const interval = setInterval(fetchActiveOrders, 120000);
         return () => clearInterval(interval);
     }, []);
+
+    // Auto-Determine Purpose based on Locations
+    useEffect(() => {
+        const src = movementForm.source_location_id;
+        const tgt = movementForm.target_location_id;
+        let newPurpose = movementForm.purpose;
+
+        if (!src && tgt === 'ANA_DEPO') newPurpose = 'giriş';
+        else if (!src && tgt === 'GİRİŞ_KALİTE') newPurpose = 'giriş';
+        else if (src === 'GİRİŞ_KALİTE' && tgt === 'ANA_DEPO') newPurpose = 'giriş';
+        else if (src === 'ANA_DEPO' && tgt === 'ÜRETİM') newPurpose = 'üretime_giden';
+        else if (src === 'ÜRETİM' && tgt === 'ANA_DEPO') newPurpose = 'iade';
+        else if (src === 'ÜRETİM' && tgt === 'ÇIKIŞ_KALİTE') newPurpose = 'çıkış';
+        else if (src === 'ÇIKIŞ_KALİTE' && tgt === 'SEVKİYAT_DEPO') newPurpose = 'satış_çıkışı';
+        else if (src === 'SEVKİYAT_DEPO' && !tgt) newPurpose = 'satış_çıkışı';
+        else if (src && !tgt) newPurpose = 'çıkış'; // Dışarıya normal çıkış
+        else if (!src && !tgt) newPurpose = 'çıkış'; // Should force at least one
+        // Default to current if no specific rule matches
+
+        if (newPurpose !== movementForm.purpose) {
+            setMovementForm(prev => ({ ...prev, purpose: newPurpose }));
+        }
+    }, [movementForm.source_location_id, movementForm.target_location_id]);
+
+    const fetchLocations = async () => {
+        try {
+            const response = await api.get("/locations");
+            setLocations(response.data);
+        } catch (error) {
+            console.error("Error fetching locations:", error);
+        }
+    };
 
     const fetchProducts = async () => {
         try {
@@ -106,10 +153,31 @@ const StockMovement = () => {
             amount: "",
             purpose: "giriş",
             order_id: "",
+            source_location_id: "GİRİŞ_KALİTE",
+            target_location_id: "ANA_DEPO",
+            tracking_code: "",
+            parent_id: "",
+            is_completed: false,
             date: new Date().toISOString().split('T')[0]
         });
         setIsMovementModalOpen(true);
     };
+
+    const handlePurposeChange = (purpose) => {
+        let source = "";
+        let target = "";
+        if (purpose === 'üretime_giden') { source = "ANA_DEPO"; target = "ÜRETİM"; }
+        else if (purpose === 'satış_çıkışı') { source = "ANA_DEPO"; target = "SEVKİYAT_DEPO"; }
+        else if (purpose === 'giriş') { source = "GİRİŞ_KALİTE"; target = "ANA_DEPO"; }
+        else if (purpose === 'iade') { source = "ÜRETİM"; target = "ANA_DEPO"; }
+
+        setMovementForm(prev => ({
+            ...prev,
+            purpose,
+            source_location_id: source,
+            target_location_id: target
+        }));
+    }
 
     const handleMovementSubmit = async (e) => {
         e.preventDefault();
@@ -118,7 +186,12 @@ const StockMovement = () => {
                 item_id: movementForm.item_id,
                 amount: parseFloat(movementForm.amount),
                 purpose: movementForm.purpose,
-                date: movementForm.date || new Date().toISOString().split('T')[0]
+                date: movementForm.date || new Date().toISOString().split('T')[0],
+                source_location_id: movementForm.source_location_id || null,
+                target_location_id: movementForm.target_location_id || null,
+                tracking_code: movementForm.tracking_code || null,
+                parent_id: movementForm.parent_id ? parseInt(movementForm.parent_id) : null,
+                is_completed: movementForm.is_completed
             };
 
             if (movementForm.order_id && movementForm.order_id.toString().trim() !== '') {
@@ -137,6 +210,40 @@ const StockMovement = () => {
         }
     };
 
+    const handleProductionSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            const payload = {
+                item_id: productionForm.item_id,
+                amount: parseFloat(productionForm.amount),
+                purpose: "giriş",
+                date: productionForm.date || new Date().toISOString().split('T')[0],
+                source_location_id: null,
+                target_location_id: "ANA_DEPO",
+                tracking_code: null,
+                parent_id: null,
+                is_completed: false
+            };
+            if (productionForm.order_id && productionForm.order_id.toString().trim() !== '') {
+                payload.order_id = parseInt(productionForm.order_id);
+            }
+
+            await api.post("/stock-movements", payload);
+            toast.success("Üretim başarıyla kaydedildi.");
+            setIsProductionModalOpen(false);
+            setProductionForm({
+                item_id: "",
+                amount: "",
+                order_id: "",
+                date: new Date().toISOString().split('T')[0]
+            });
+            fetchMovements();
+        } catch (error) {
+            console.error("Error saving production:", error);
+            toast.error("Üretim kaydedilemedi.");
+        }
+    };
+
     if (loading) return <div className="p-6">Yükleniyor...</div>;
 
     return (
@@ -151,13 +258,22 @@ const StockMovement = () => {
                         </h1>
                         <p className="text-gray-500 mt-1">Stok giriş-çıkış hareketlerini izleyin.</p>
                     </div>
-                    <button
-                        onClick={() => openMovementModal()}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                        <ArrowRightLeft size={18} />
-                        Yeni Hareket Ekle
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setIsProductionModalOpen(true)}
+                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                            <Factory size={18} />
+                            Üretimi Kaydet
+                        </button>
+                        <button
+                            onClick={() => openMovementModal()}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                            <ArrowRightLeft size={18} />
+                            Yeni Hareket Ekle
+                        </button>
+                    </div>
                 </div>
 
                 {/* Filters */}
@@ -197,6 +313,7 @@ const StockMovement = () => {
                                 <option value="giriş">Giriş</option>
                                 <option value="çıkış">Çıkış</option>
                                 <option value="üretime_giden">Üretime Giden</option>
+                                <option value="iade">Üretimden İade</option>
                                 <option value="satış_çıkışı">Satış Çıkışı</option>
                             </select>
                         </div>
@@ -238,16 +355,26 @@ const StockMovement = () => {
                             <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Tarih</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Takip ID</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Kaynak &rarr; Hedef</th>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Sip. No</th>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Ürün Kodu</th>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Miktar</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Amaç</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">İşlem / Durum</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {visibleData.map((item, index) => (
                                     <tr key={index} className="hover:bg-gray-50/50 transition-colors">
                                         <td className="px-6 py-4 text-sm text-gray-600">{item.date}</td>
+                                        <td className="px-6 py-4 text-xs font-mono text-gray-500 font-medium">
+                                            {item.tracking_code || '-'}
+                                        </td>
+                                        <td className="px-6 py-4 text-xs font-semibold text-gray-500 flex items-center gap-1">
+                                            <span className="truncate max-w-[80px] bg-gray-100 px-1.5 py-0.5 rounded" title={item.source_location_id || '-'}>{item.source_location_id || '---'}</span>
+                                            &rarr;
+                                            <span className="truncate max-w-[80px] bg-gray-100 px-1.5 py-0.5 rounded" title={item.target_location_id || '-'}>{item.target_location_id || '---'}</span>
+                                        </td>
                                         <td className="px-6 py-4 text-sm text-gray-500 font-medium">
                                             {item.order_id ? `#${item.order_id}` : '-'}
                                         </td>
@@ -256,10 +383,11 @@ const StockMovement = () => {
                                             }`}>
                                             {item.purpose === 'giriş' ? '+' : '-'}{item.amount}
                                         </td>
-                                        <td className="px-6 py-4 text-sm">
-                                            <span className="capitalize px-2 py-1 bg-gray-100 rounded text-gray-600 text-xs">
+                                        <td className="px-6 py-4 text-sm flex items-center gap-2">
+                                            <span className="capitalize px-2 py-1 bg-gray-100 rounded text-gray-600 text-xs font-medium">
                                                 {item.purpose.replace(/_/g, " ")}
                                             </span>
+                                            {item.is_completed && <span className="bg-green-100 font-bold text-green-700 text-[10px] px-1.5 py-0.5 rounded shadow-sm border border-green-200">KAPALI</span>}
                                         </td>
                                     </tr>
                                 ))}
@@ -386,23 +514,80 @@ const StockMovement = () => {
                                 </div>
                             </div>
 
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Kaynak Depo</label>
+                                    <select
+                                        value={movementForm.source_location_id}
+                                        onChange={e => setMovementForm({ ...movementForm, source_location_id: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    >
+                                        <option value="">-- Dışarıdan --</option>
+                                        {locations.map(loc => (
+                                            <option key={loc.location_id} value={loc.location_id}>{loc.location_name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Hedef Depo</label>
+                                    <select
+                                        value={movementForm.target_location_id}
+                                        onChange={e => setMovementForm({ ...movementForm, target_location_id: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    >
+                                        <option value="">-- Dışarıya --</option>
+                                        {locations.map(loc => (
+                                            <option key={loc.location_id} value={loc.location_id}>{loc.location_name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">İşlem Amacı (Tür)</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">İşlem Amacı (Sistem Tarafından Belirlenir)</label>
                                 <select
                                     value={movementForm.purpose}
-                                    onChange={e => setMovementForm({ ...movementForm, purpose: e.target.value })}
+                                    onChange={e => handlePurposeChange(e.target.value)}
+                                    disabled={true}
+                                    className="w-full px-3 py-2 border border-blue-200 bg-blue-50 bg-opacity-50 text-blue-900 rounded-lg focus:outline-none cursor-not-allowed font-medium"
+                                >
+                                    <option value="üretime_giden">Üretime Giden (Üretime Çıkış)</option>
+                                    <option value="iade">Üretimden İade (Depoya Dönüş)</option>
+                                    <option value="satış_çıkışı">Satış Çıkışı (Sevkıyat)</option>
+                                    <option value="giriş">Giriş (Stok Artır)</option>
+                                    <option value="çıkış">Çıkış / Diğer (Stok Düşür)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Takip Kodu (İsteğe Bağlı)</label>
+                                <select
+                                    value={movementForm.tracking_code}
+                                    onChange={e => {
+                                        const code = e.target.value;
+                                        setMovementForm(prev => {
+                                            const newState = { ...prev, tracking_code: code };
+                                            if (code) {
+                                                const parentMove = movements.find(m => m.tracking_code === code && m.purpose === 'üretime_giden');
+                                                if (parentMove && parentMove.order_id) {
+                                                    newState.order_id = parentMove.order_id;
+                                                }
+                                            }
+                                            return newState;
+                                        });
+                                    }}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 >
-                                    <option value="üretime_giden">Üretime Giden</option>
-                                    <option value="satış_çıkışı">Satış Çıkışı</option>
-                                    <option value="giriş">Giriş (Stok Artır)</option>
-                                    <option value="çıkış">Çıkış (Diğer Stok Düşür)</option>
+                                    <option value="">-- Yeni Oluştur (Otomatik) --</option>
+                                    {[...new Set(movements.filter(m => m.item_id === movementForm.item_id && m.tracking_code).map(m => m.tracking_code))].map(code => (
+                                        <option key={code} value={code}>{code}</option>
+                                    ))}
                                 </select>
                             </div>
 
                             {/* Order Selection - Visible always */}
-                            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                                <label className="block text-sm font-medium text-yellow-800 mb-1 flex items-center gap-1">
+                            <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                                <label className="block text-sm font-medium text-blue-800 mb-1 flex items-center gap-1">
                                     <Factory size={14} />
                                     Hangi Sipariş İçin?
                                 </label>
@@ -412,19 +597,27 @@ const StockMovement = () => {
                                     placeholder="Sipariş No (Örn: 1024) Ara (Opsiyonel)"
                                     value={movementForm.order_id}
                                     onChange={e => setMovementForm({ ...movementForm, order_id: e.target.value })}
-                                    className="w-full px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 outline-none bg-white font-medium"
+                                    disabled={!!movementForm.tracking_code}
+                                    className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-medium disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                                 />
                                 <datalist id="active-orders-list">
-                                    <option value="">-- Genel Stok İşlemi (Siparişsiz) --</option>
                                     {activeOrders.map(order => (
                                         <option key={order.id} value={order.id}>
                                             #{order.id} - {order.customer_name} ({order.item_id})
                                         </option>
                                     ))}
                                 </datalist>
-                                <p className="text-xs text-yellow-600 mt-1">
-                                    Eğer bir sipariş için işlem yapıyorsanız buradan seçiniz. Üretim çıkışı ise simülasyon bu miktarı düşecektir.
-                                </p>
+                            </div>
+
+                            <div className="mt-2 flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="isCompleted"
+                                    checked={movementForm.is_completed}
+                                    onChange={e => setMovementForm({ ...movementForm, is_completed: e.target.checked })}
+                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <label htmlFor="isCompleted" className="text-xs font-bold text-gray-700">Tümü Kullanıldı (Sipariş/Paket Kapatılsın)</label>
                             </div>
 
                             <div className="flex justify-end gap-3 mt-6">
@@ -446,6 +639,108 @@ const StockMovement = () => {
                     </div>
                 </div>
             )}
+
+            {/* Production Modal Add-On */}
+            {
+                isProductionModalOpen && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200">
+                        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md m-4 border border-green-200">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-xl font-bold text-green-900 flex items-center gap-2">
+                                    <Factory size={24} className="text-green-600" />
+                                    Üretimi Kaydet
+                                </h2>
+                                <button onClick={() => setIsProductionModalOpen(false)} className="text-gray-400 hover:text-red-500 transition">
+                                    <XCircle size={24} />
+                                </button>
+                            </div>
+
+                            <form onSubmit={handleProductionSubmit} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Üretilen Ürün/Yarı Mamül</label>
+                                    <select
+                                        required
+                                        value={productionForm.item_id}
+                                        onChange={e => setProductionForm({ ...productionForm, item_id: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none font-medium"
+                                    >
+                                        <option value="">-- Ürün Seçiniz --</option>
+                                        {products.map(p => (
+                                            <option key={p.item_id} value={p.item_id}>
+                                                {p.item_id} - {p.item_type}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex gap-4">
+                                    <div className="flex-1">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Miktar</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            required
+                                            min="0.01"
+                                            value={productionForm.amount}
+                                            onChange={e => setProductionForm({ ...productionForm, amount: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Tarih</label>
+                                        <input
+                                            type="date"
+                                            required
+                                            value={productionForm.date}
+                                            onChange={e => setProductionForm({ ...productionForm, date: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                                    <label className="block text-sm font-medium text-green-800 mb-1 flex items-center gap-1">
+                                        Hangi Sipariş İçin? (Opsiyonel)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        list="active-production-orders-list"
+                                        placeholder="Sipariş No (Örn: 1024)"
+                                        value={productionForm.order_id}
+                                        onChange={e => setProductionForm({ ...productionForm, order_id: e.target.value })}
+                                        className="w-full px-3 py-2 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none bg-white font-medium"
+                                    />
+                                    <datalist id="active-production-orders-list">
+                                        {activeOrders.map(order => (
+                                            <option key={order.id} value={order.id}>
+                                                #{order.id} - {order.customer_name} ({order.item_id})
+                                            </option>
+                                        ))}
+                                    </datalist>
+                                    <p className="text-xs text-green-700 mt-2 font-medium">Not: Ürün doğrudan Ana Depo'ya eklenecektir.</p>
+                                </div>
+
+                                <div className="flex justify-end gap-3 mt-6">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsProductionModalOpen(false)}
+                                        className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                                    >
+                                        İptal
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm transition-colors"
+                                    >
+                                        Üretimi Kaydet
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )
+            }
         </div>
     );
 };

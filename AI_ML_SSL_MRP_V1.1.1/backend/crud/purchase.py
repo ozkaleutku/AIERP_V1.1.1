@@ -8,7 +8,7 @@ def get_orders():
     Limit: 100
     """
     sql = """
-    SELECT p.*, i.item_quantity_type as unit
+    SELECT p.*, i.item_quantity_type as unit, i.currency
     FROM purchase p
     LEFT JOIN item i ON p.item_id = i.item_id
     ORDER BY p.purchase_date DESC, p.id DESC
@@ -16,7 +16,7 @@ def get_orders():
     """
     return run_query(sql)
 
-def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date):
+def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date, unit_price=0):
     """
     Yeni bir satın alma siparişi oluşturur.
     """
@@ -25,11 +25,17 @@ def create_order(item_id, supplier_id, amount, purpose, purchase_date, expected_
     if not is_valid:
         raise ValueError(error_msg)
         
+    # If unit_price is 0 or None, use the current unit_cost from item as default
+    if not unit_price or unit_price == 0:
+        item_df = run_query("SELECT unit_cost FROM item WHERE item_id = %s", (item_id,))
+        if not item_df.empty:
+            unit_price = float(item_df.iloc[0]['unit_cost']) or 0
+            
     sql = """
-    INSERT INTO purchase (item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date)
-    VALUES (%s, %s, %s, %s, %s, %s)
+    INSERT INTO purchase (item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date, unit_price)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
-    params = (item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date)
+    params = (item_id, supplier_id, amount, purpose, purchase_date, expected_coming_date, unit_price)
     return run_command(sql, params)
 
 def delete_order(order_id):
@@ -97,6 +103,10 @@ def update_order(order_id, item_id=None, supplier_id=None, amount=None, purpose=
     if expected_coming_date is not None:
         fields.append("expected_coming_date = %s")
         params.append(expected_coming_date)
+        
+    if unit_price is not None:
+        fields.append("unit_price = %s")
+        params.append(unit_price)
         
     if not fields:
         return False

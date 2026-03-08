@@ -472,6 +472,7 @@ const Suppliers = () => {
                             <tr>
                                 <th className="px-4 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ürün</th>
                                 <th className="px-4 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tedarikçi</th>
+
                                 <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Hesaplanan?</th>
                                 <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider bg-gray-50">Given Mean</th>
                                 <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider bg-gray-50">Given Std</th>
@@ -497,6 +498,7 @@ const Suppliers = () => {
                                     >
                                         <td className="px-4 py-4 text-sm font-medium text-gray-900">{item.item_id}</td>
                                         <td className="px-4 py-4 text-sm text-gray-600">{item.supplier_id}</td>
+
 
                                         {/* Use Calculated Checkbox */}
                                         <td className="px-4 py-4 text-center">

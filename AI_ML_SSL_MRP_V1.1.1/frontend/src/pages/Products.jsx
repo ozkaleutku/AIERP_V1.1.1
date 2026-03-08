@@ -1,9 +1,18 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { Plus, Search, Filter, X, Trash2, Edit2, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback, Fragment } from "react";
+import {
+    Search, Filter, Plus, Edit2, Trash2, ChevronDown, ChevronUp, Layers,
+    Download, TrendingUp, Info, Save, History, BarChart3, ShieldAlert, CheckCircle2, X
+} from "lucide-react";
+import ForecastDetailChart from "../components/ForecastDetailChart";
+import SafetyStockDetailChart from "../components/SafetyStockDetailChart";
 import api from "../api";
 import toast from "react-hot-toast";
 import ConfirmModal from "../components/ConfirmModal";
 import { matchTurkish } from "../utils/stringUtils";
+import {
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+    ResponsiveContainer, BarChart, Bar
+} from 'recharts';
 
 // Item Types
 const ITEM_TYPES = [
@@ -30,6 +39,10 @@ const NewProductModal = ({ onClose, onSubmit, initialData }) => {
         item_type: "mamül",
         item_quantity_type: "adet",
         activity_status: "Aktif",
+        unit_cost: 0,
+        unit_price: 0,
+        additional_cost: 0,
+        currency: "TRY"
     });
     const [error, setError] = useState("");
 
@@ -122,6 +135,71 @@ const NewProductModal = ({ onClose, onSubmit, initialData }) => {
                         </select>
                     </div>
 
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                {formData.item_type === 'hammadde' ? 'Birim Alış' : 'Birim Maliyet (Malzeme)'}
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={formData.unit_cost}
+                                onChange={(e) => setFormData({ ...formData, unit_cost: e.target.value })}
+                                disabled={formData.item_type !== 'hammadde'}
+                                className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${formData.item_type !== 'hammadde' ? 'bg-gray-50 text-gray-500' : 'border-gray-200 focus:ring-2 focus:ring-blue-500/20'}`}
+                            />
+                            {formData.item_type !== 'hammadde' && (
+                                <p className="text-[10px] text-gray-400 mt-1">* Reçeteden otomatik hesaplanır</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Satış Fiyatı</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={formData.unit_price}
+                                onChange={(e) => setFormData({ ...formData, unit_price: e.target.value })}
+                                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    {formData.item_type !== 'hammadde' && (
+                        <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+                            <label className="block text-xs font-bold text-blue-700 uppercase mb-2">Ek İşletme Maliyeti</label>
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1">
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        value={formData.additional_cost}
+                                        onChange={(e) => setFormData({ ...formData, additional_cost: e.target.value })}
+                                        placeholder="İşçilik, makine vb."
+                                        className="w-full px-4 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-white transition-all shadow-sm"
+                                    />
+                                </div>
+                                <div className="text-blue-600 font-bold">{formData.currency}</div>
+                            </div>
+                            <p className="text-[11px] text-blue-600/70 mt-2">
+                                * Bu tutar, reçete maliyetine eklenerek birim maliyeti oluşturur.
+                            </p>
+                        </div>
+                    )}
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Para Birimi</label>
+                        <select
+                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            value={formData.currency}
+                            onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                        >
+                            <option value="TRY">TRY (₺)</option>
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="GBP">GBP (£)</option>
+                        </select>
+                    </div>
+
                     <div className="flex gap-3 pt-4">
                         <button
                             type="button"
@@ -160,6 +238,10 @@ const Products = () => {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
+
+    // Expansion State
+    const [expandedRows, setExpandedRows] = useState({}); // { itemId: detailObject }
+    const [activeTabs, setActiveTabs] = useState({}); // { itemId: 'prices' | 'ss' | 'forecast' }
 
     // Confirmation State
     const [confirmModal, setConfirmModal] = useState({
@@ -226,8 +308,11 @@ const Products = () => {
             if (isEdit) {
                 await api.put(`/products/${productData.item_id}`, {
                     activity_status: productData.activity_status,
-                    item_type: productData.item_type,
-                    item_quantity_type: productData.item_quantity_type
+                    item_quantity_type: productData.item_quantity_type,
+                    unit_cost: productData.unit_cost,
+                    unit_price: productData.unit_price,
+                    additional_cost: productData.additional_cost,
+                    currency: productData.currency
                 });
                 toast.success("Ürün başarıyla güncellendi.", { id: toastId });
             } else {
@@ -276,6 +361,27 @@ const Products = () => {
         } catch (error) {
             console.error("Error deleting product:", error);
             toast.error(error.response?.data?.detail || "Ürün silinirken hata oluştu.", { id: toastId });
+        }
+    };
+
+    const toggleRow = async (itemId) => {
+        if (expandedRows[itemId]) {
+            const newExpanded = { ...expandedRows };
+            delete newExpanded[itemId];
+            setExpandedRows(newExpanded);
+
+            const newTabs = { ...activeTabs };
+            delete newTabs[itemId];
+            setActiveTabs(newTabs);
+        } else {
+            try {
+                const res = await api.get(`/products/${itemId}/details`);
+                setExpandedRows(prev => ({ ...prev, [itemId]: res.data }));
+                setActiveTabs(prev => ({ ...prev, [itemId]: 'prices' }));
+            } catch (err) {
+                console.error("Error fetching product details:", err);
+                toast.error("Ürün detayları yüklenemedi.");
+            }
         }
     };
 
@@ -354,12 +460,14 @@ const Products = () => {
                     <table className="w-full relative">
                         <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                             <tr>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50 w-10"></th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Ürün Kodu</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Tip</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Birim</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Durum</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Ortalama Talep</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Talep Sapması</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Ek Maliyet</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Toplam Maliyet / Fiyat</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">İşlemler</th>
                             </tr>
                         </thead>
@@ -374,41 +482,117 @@ const Products = () => {
                                 </tr>
                             ) : (
                                 products.map((item) => (
-                                    <tr
-                                        key={item.item_id}
-                                        className="hover:bg-gray-50/50 transition-colors"
-                                    >
-                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.item_id}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600 capitalize">{item.item_type?.replace('_', ' ')}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-500">{item.item_quantity_type}</td>
+                                    <Fragment key={item.item_id}>
+                                        <tr
+                                            className={`hover:bg-gray-50/50 transition-colors ${expandedRows[item.item_id] ? 'bg-blue-50/30' : ''}`}
+                                        >
+                                            <td className="px-6 py-4">
+                                                <button
+                                                    onClick={() => toggleRow(item.item_id)}
+                                                    className="p-1 hover:bg-gray-200 rounded transition-colors text-gray-400"
+                                                >
+                                                    {expandedRows[item.item_id] ? <ChevronUp size={18} /> : <TrendingUp size={18} />}
+                                                </button>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.item_id}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-600 capitalize">{item.item_type?.replace('_', ' ')}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-500">{item.item_quantity_type}</td>
 
-                                        <td className="px-6 py-4 text-sm">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.activity_status === 'Aktif' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                                }`}>
-                                                {item.activity_status}
-                                            </span>
-                                        </td>
+                                            <td className="px-6 py-4 text-sm">
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.activity_status === 'Aktif' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                                    }`}>
+                                                    {item.activity_status}
+                                                </span>
+                                            </td>
 
-                                        <td className="px-6 py-4 text-sm text-gray-600 font-semibold">{item.demand_avg}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{item.demand_deviation}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-600 font-semibold">{item.demand_avg}</td>
+                                            <td className="px-6 py-4 text-sm">
+                                                {item.additional_cost > 0 ? (
+                                                    <span className="text-blue-600 font-medium">{item.additional_cost} {item.currency}</span>
+                                                ) : item.item_type === 'hammadde' ? (
+                                                    <span className="text-gray-400">---</span>
+                                                ) : (
+                                                    <span className="text-gray-300">0.00</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm whitespace-nowrap">
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded font-bold uppercase">Maliyet</span>
+                                                        <span className="text-sm font-bold text-gray-900">{item.unit_cost} {item.currency}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 rounded font-bold uppercase">Satış</span>
+                                                        <span className="text-sm font-bold text-green-700">{item.unit_price} {item.currency}</span>
+                                                    </div>
+                                                </div>
+                                            </td>
 
-                                        <td className="px-6 py-4 text-right text-sm">
-                                            <button
-                                                onClick={() => handleDeleteProduct(item.item_id)}
-                                                className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition-colors"
-                                                title="Sil"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => openEditModal(item)}
-                                                className="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg transition-colors ml-2"
-                                                title="Düzenle"
-                                            >
-                                                <Edit2 size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
+                                            <td className="px-6 py-4 text-right text-sm">
+                                                <button
+                                                    onClick={() => handleDeleteProduct(item.item_id)}
+                                                    className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition-colors"
+                                                    title="Sil"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => openEditModal(item)}
+                                                    className="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg transition-colors ml-2"
+                                                    title="Düzenle"
+                                                >
+                                                    <Edit2 size={16} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        {expandedRows[item.item_id] && (
+                                            <tr className="bg-gray-50/50">
+                                                <td colSpan="8" className="px-6 py-6">
+                                                    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xl">
+                                                        {/* Price History Section */}
+                                                        {activeTabs[item.item_id] && (
+                                                            <div className="animate-in fade-in duration-300">
+                                                                <div className="flex items-center justify-between mb-6 px-1">
+                                                                    <div>
+                                                                        <h4 className="text-sm font-semibold text-gray-900">Satın Alma & Satış Trendleri</h4>
+                                                                        <p className="text-xs text-gray-500">Tarihsel birim maliyet ve satış fiyatı analizi</p>
+                                                                    </div>
+                                                                    <div className="flex gap-4">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                                                                            <span className="text-xs text-gray-600">Alış</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                                                            <span className="text-xs text-gray-600">Satış</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+                                                                            <span className="text-xs text-gray-600">Maliyet</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="w-full" style={{ minWidth: 100, minHeight: 300 }}>
+                                                                    <ResponsiveContainer width="99%" height={300}>
+                                                                        <LineChart data={expandedRows[item.item_id].prices} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                                                            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} dy={10} />
+                                                                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(value) => `${value}₺`} />
+                                                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                                            <Line name="Alış" type="monotone" dataKey="purchase_price" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} connectNulls />
+                                                                            <Line name="Satış" type="monotone" dataKey="sales_price" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} connectNulls />
+                                                                            <Line name="Maliyet" type="monotone" dataKey="internal_cost" stroke="#a855f7" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls />
+                                                                        </LineChart>
+                                                                    </ResponsiveContainer>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
                                 ))
                             )}
                         </tbody>

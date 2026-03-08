@@ -1,7 +1,7 @@
 from backend.database.db_helper import run_query, run_command
 import pandas as pd
 
-def create_item(item_id, item_type, quantity_type, status='Aktif'):
+def create_item(item_id, item_type, quantity_type, status='Aktif', unit_cost=0, unit_price=0, additional_cost=0, currency='TRY'):
     """
     Yeni bir ürün oluşturur.
     
@@ -10,12 +10,16 @@ def create_item(item_id, item_type, quantity_type, status='Aktif'):
         item_type (str): 'mamül', 'yarı_mamül', 'hammadde'
         quantity_type (str): 'adet', 'gram', 'litre'
         status (str): 'Aktif' veya 'Pasif'
+        unit_cost (float): Birim maliyet
+        unit_price (float): Birim fiyat
+        additional_cost (float): Ek maliyet
+        currency (str): Para birimi
     """
     query = """
-    INSERT INTO item (item_id, item_type, item_quantity_type, activity_status, demand_avg, demand_deviation)
-    VALUES (%s, %s, %s, %s, 0, 0)
+    INSERT INTO item (item_id, item_type, item_quantity_type, activity_status, demand_avg, demand_deviation, unit_cost, unit_price, additional_cost, currency)
+    VALUES (%s, %s, %s, %s, 0, 0, %s, %s, %s, %s)
     """
-    params = (item_id, item_type, quantity_type, status)
+    params = (item_id, item_type, quantity_type, status, unit_cost, unit_price, additional_cost, currency)
     return run_command(query, params)
 
 def search_items(item_id=None, item_type=None, status=None, limit=None, offset=None):
@@ -63,7 +67,7 @@ def search_items(item_id=None, item_type=None, status=None, limit=None, offset=N
         query = "SELECT * FROM item" + base_where + " ORDER BY item_id"
         return run_query(query, tuple(params))
 
-def update_item(item_id, item_type=None, quantity_type=None, status=None):
+def update_item(item_id, item_type=None, quantity_type=None, status=None, unit_cost=None, unit_price=None, additional_cost=None, currency=None):
     """
     Ürün özelliklerini günceller.
     Değer gönderilmeyen (None) alanlar güncellenmez.
@@ -83,6 +87,22 @@ def update_item(item_id, item_type=None, quantity_type=None, status=None):
     if status:
         fields.append("activity_status = %s")
         params.append(status)
+
+    if unit_cost is not None:
+        fields.append("unit_cost = %s")
+        params.append(unit_cost)
+
+    if unit_price is not None:
+        fields.append("unit_price = %s")
+        params.append(unit_price)
+
+    if additional_cost is not None:
+        fields.append("additional_cost = %s")
+        params.append(additional_cost)
+
+    if currency is not None:
+        fields.append("currency = %s")
+        params.append(currency)
         
     if not fields:
         return False

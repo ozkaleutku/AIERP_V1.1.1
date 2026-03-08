@@ -99,6 +99,25 @@ def run_command(command, params=None):
             release_db_connection(conn)
     return False
 
+def run_command_returning(command, params=None):
+    """Executes a command (like INSERT ... RETURNING id) and returns the first column of the first row."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute(command, params)
+            result = cur.fetchone()
+            conn.commit()
+            cur.close()
+            return result[0] if result else None
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Command Returning Error: {e}")
+            raise e
+        finally:
+            release_db_connection(conn)
+    return None
+
 def run_command_batch(command, params_list):
     """
     Batch INSERT/UPDATE/DELETE for better performance.

@@ -17,12 +17,13 @@ def run_prophet_by_item(item_id, target_year):
     Tek bir ürün için Prophet tahminini çalıştırır ve sonucu döner.
     Dönüş formatı: [(item_id, date, amount), ...] listesi
     """
-    # 1. Veriyi Çek
+    # 1. Veriyi Çek (AYLIK TOPLAM olarak)
     query = """
-    SELECT date as ds, amount as y 
+    SELECT date_trunc('month', date) as ds, SUM(amount) as y 
     FROM sales_out_history 
     WHERE item_id = %s 
-    ORDER BY date
+    GROUP BY date_trunc('month', date)
+    ORDER BY ds
     """
     df = run_query(query, (item_id,))
     
@@ -30,11 +31,8 @@ def run_prophet_by_item(item_id, target_year):
         logger.warning(f"Skipping {item_id}: Yetersiz veri ({len(df)} kayıt)")
         return []
 
-    # Tarihi datetime formatına çevir
-    df['ds'] = pd.to_datetime(df['ds'])
-    
-    # Aynı güne denk gelen satışları topla (Prophet kuralı: Tekrar eden tarih olmamalı)
-    df = df.groupby('ds')['y'].sum().reset_index()
+    # Tarihi datetime formatına çevir (timezone bilgisini kaldır - Prophet timezone-naive ister)
+    df['ds'] = pd.to_datetime(df['ds']).dt.tz_localize(None)
 
     try:
         # 2. Modeli Eğit
@@ -54,11 +52,13 @@ def run_prophet_by_item(item_id, target_year):
         # 4. Tahmin Yap
         forecast = model.predict(future)
         
-        # 5. Sonuçları Hazırla
+        # 5. Sonuçları Hazırla (yhat_lower ve yhat_upper ile birlikte)
         results = []
         for _, row in forecast.iterrows():
             pred_value = max(0, row['yhat'])
-            results.append((item_id, row['ds'].date(), round(pred_value, 2)))
+            lower = max(0, row['yhat_lower'])
+            upper = max(0, row['yhat_upper'])
+            results.append((item_id, row['ds'].date(), round(pred_value, 2), round(lower, 2), round(upper, 2)))
             
         return results
 
@@ -102,8 +102,8 @@ def run_full_analysis():
     # A. Mevcut verileri History tablosuna yedekle
     logger.info("Mevcut geçici veriler history tablosuna yedekleniyor...")
     run_command("""
-    INSERT INTO prophet_table_history (item_id, date, amount)
-    SELECT item_id, date, amount FROM prophet_table_temporary
+    INSERT INTO prophet_table_history (item_id, date, amount, yhat_lower, yhat_upper)
+    SELECT item_id, date, amount, yhat_lower, yhat_upper FROM prophet_table_temporary
     ON CONFLICT (item_id, date) DO NOTHING
     """)
 
@@ -114,9 +114,10 @@ def run_full_analysis():
     # C. Yeni Verileri Kaydet
     logger.info("Yeni tahminler kaydediliyor...")
     insert_query = """
-    INSERT INTO prophet_table_temporary (item_id, date, amount)
-    VALUES (%s, %s, %s)
-    ON CONFLICT (item_id, date) DO UPDATE SET amount = EXCLUDED.amount
+    INSERT INTO prophet_table_temporary (item_id, date, amount, yhat_lower, yhat_upper)
+    VALUES (%s, %s, %s, %s, %s)
+    ON CONFLICT (item_id, date) DO UPDATE SET amount = EXCLUDED.amount,
+        yhat_lower = EXCLUDED.yhat_lower, yhat_upper = EXCLUDED.yhat_upper
     """
     if run_command_batch(insert_query, all_forecasts):
         logger.info("Kayıt başarılı.")
