@@ -19,8 +19,7 @@ backend/
 │
 ├── database/
 │   ├── db_helper.py                           # DB bağlantı ve sorgu yardımcıları
-│   ├── database_setup.py                      # Tablo oluşturma ve seed
-│   └── sync_ai_history.py                     # AI geçmiş verisi senkronizasyonu
+│   └── database_setup.py                      # Tablo oluşturma
 │
 └── modules/
     │
