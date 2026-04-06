@@ -41,9 +41,10 @@ def rebuild_simulation_from_scratch():
         try:
              set_current_order_id(order['id'])
              due_date = order['expected_delivery_date'] or order['order_date']
-             prod_time = int(order['production_time_days'] or 0)
+             # Manuel override: sipariş formundan girilen üretim süresi varsa onu ilet
+             prod_time_override = int(order['production_time_days']) if order['production_time_days'] else None
              
-             process_demand(order['item_id'], float(order['amount']), due_date, prod_time)
+             process_demand(order['item_id'], float(order['amount']), due_date, prod_time_override)
         except Exception as e:
              logger.error(f"Error simulating order {order['id']}: {e}")
              warnings.append({"order_id": order['id'], "error": str(e)})

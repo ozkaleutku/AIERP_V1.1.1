@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, Fragment } from "react";
 import {
     Search, Filter, Plus, Edit2, Trash2, ChevronDown, ChevronUp, Layers,
-    Download, TrendingUp, Info, Save, History, BarChart3, ShieldAlert, CheckCircle2, X
+    Download, TrendingUp, Info, Save, History, BarChart3, ShieldAlert, CheckCircle2, X, Clock
 } from "lucide-react";
 import ForecastDetailChart from "../../forecasting/components/ForecastDetailChart";
 import SafetyStockDetailChart from "../../forecasting/components/SafetyStockDetailChart";
@@ -42,7 +42,9 @@ const NewProductModal = ({ onClose, onSubmit, initialData }) => {
         unit_cost: 0,
         unit_price: 0,
         additional_cost: 0,
-        currency: "TRY"
+        currency: "TRY",
+        production_time_value: 0,
+        production_time_unit: "saat"
     });
     const [error, setError] = useState("");
 
@@ -123,6 +125,40 @@ const NewProductModal = ({ onClose, onSubmit, initialData }) => {
                             </select>
                         </div>
                     </div>
+
+                    {/* Üretim Süresi - Only for mamül and yarı_mamül */}
+                    {(formData.item_type === 'mamül' || formData.item_type === 'yarı_mamül') && (
+                        <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                            <label className="block text-xs font-bold text-amber-700 uppercase mb-2 flex items-center gap-1.5">
+                                <Clock size={14} />
+                                Üretim Süresi (1 Adet)
+                            </label>
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1">
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={formData.production_time_value}
+                                        onChange={(e) => setFormData({ ...formData, production_time_value: e.target.value })}
+                                        placeholder="Örn: 2.5"
+                                        className="w-full px-4 py-2 border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none bg-white transition-all shadow-sm"
+                                    />
+                                </div>
+                                <select
+                                    value={formData.production_time_unit}
+                                    onChange={(e) => setFormData({ ...formData, production_time_unit: e.target.value })}
+                                    className="px-4 py-2 border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none bg-white transition-all shadow-sm font-medium text-amber-700"
+                                >
+                                    <option value="saat">Saat</option>
+                                    <option value="gün">Gün</option>
+                                </select>
+                            </div>
+                            <p className="text-[11px] text-amber-600/70 mt-2">
+                                * 1 adet ürünün üretilme süresi. Sipariş planlama ve çizelgeleme hesaplarında kullanılır.
+                            </p>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Durum</label>
@@ -312,7 +348,9 @@ const Products = () => {
                     unit_cost: productData.unit_cost,
                     unit_price: productData.unit_price,
                     additional_cost: productData.additional_cost,
-                    currency: productData.currency
+                    currency: productData.currency,
+                    production_time_value: productData.production_time_value,
+                    production_time_unit: productData.production_time_unit
                 });
                 toast.success("Ürün başarıyla güncellendi.", { id: toastId });
             } else {
@@ -468,6 +506,7 @@ const Products = () => {
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Ortalama Talep</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Ek Maliyet</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Toplam Maliyet / Fiyat</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Üretim Süresi</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">İşlemler</th>
                             </tr>
                         </thead>
@@ -528,6 +567,21 @@ const Products = () => {
                                                 </div>
                                             </td>
 
+                                            <td className="px-6 py-4 text-sm whitespace-nowrap">
+                                                {(item.item_type === 'mamül' || item.item_type === 'yarı_mamül') && item.production_time_value > 0 ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Clock size={14} className="text-amber-500" />
+                                                        <span className="font-medium text-amber-700">
+                                                            {item.production_time_value} {item.production_time_unit === 'gün' ? 'Gün' : 'Saat'}
+                                                        </span>
+                                                    </div>
+                                                ) : item.item_type === 'hammadde' ? (
+                                                    <span className="text-gray-400">---</span>
+                                                ) : (
+                                                    <span className="text-gray-300">Tanımsız</span>
+                                                )}
+                                            </td>
+
                                             <td className="px-6 py-4 text-right text-sm">
                                                 <button
                                                     onClick={() => handleDeleteProduct(item.item_id)}
@@ -547,7 +601,7 @@ const Products = () => {
                                         </tr>
                                         {expandedRows[item.item_id] && (
                                             <tr className="bg-gray-50/50">
-                                                <td colSpan="8" className="px-6 py-6">
+                                                <td colSpan="10" className="px-6 py-6">
                                                     <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xl">
                                                         {/* Price History Section */}
                                                         {activeTabs[item.item_id] && (

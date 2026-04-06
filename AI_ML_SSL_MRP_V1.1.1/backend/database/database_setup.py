@@ -40,6 +40,9 @@ def create_tables():
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'customer_order_status_enum') THEN
                 CREATE TYPE customer_order_status_enum AS ENUM ('Bekleniyor', 'Üretimde', 'Hazır', 'Sevk Edildi');
             END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'production_time_unit_enum') THEN
+                CREATE TYPE production_time_unit_enum AS ENUM ('saat', 'gün');
+            END IF;
         END$$;
         """,
 
@@ -55,7 +58,9 @@ def create_tables():
             unit_cost DECIMAL(12, 2) DEFAULT 0,
             unit_price DECIMAL(12, 2) DEFAULT 0,
             additional_cost DECIMAL(12, 2) DEFAULT 0,
-            currency VARCHAR(5) DEFAULT 'TRY'
+            currency VARCHAR(5) DEFAULT 'TRY',
+            production_time_value DECIMAL(10, 2) DEFAULT 0,
+            production_time_unit VARCHAR(10) DEFAULT 'saat'
         )
         """,
         # 1b. Update existing item table if columns missing (ERP Expansion)
@@ -63,6 +68,8 @@ def create_tables():
         "ALTER TABLE item ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12, 2) DEFAULT 0",
         "ALTER TABLE item ADD COLUMN IF NOT EXISTS additional_cost DECIMAL(12, 2) DEFAULT 0",
         "ALTER TABLE item ADD COLUMN IF NOT EXISTS currency VARCHAR(5) DEFAULT 'TRY'",
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS production_time_value DECIMAL(10, 2) DEFAULT 0",
+        "ALTER TABLE item ADD COLUMN IF NOT EXISTS production_time_unit VARCHAR(10) DEFAULT 'saat'",
         
         # 1c. item_price_history (Snapshots of item costs/prices)
         """

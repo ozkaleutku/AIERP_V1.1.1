@@ -1,7 +1,7 @@
 from backend.database.db_helper import run_query, run_command
 
 
-def create_item(item_id, item_type, quantity_type, status='Aktif', unit_cost=0, unit_price=0, additional_cost=0, currency='TRY'):
+def create_item(item_id, item_type, quantity_type, status='Aktif', unit_cost=0, unit_price=0, additional_cost=0, currency='TRY', production_time_value=0, production_time_unit='saat'):
     """
     Yeni bir ürün oluşturur.
     
@@ -14,12 +14,14 @@ def create_item(item_id, item_type, quantity_type, status='Aktif', unit_cost=0, 
         unit_price (float): Birim fiyat
         additional_cost (float): Ek maliyet
         currency (str): Para birimi
+        production_time_value (float): 1 adet üretim süresi değeri
+        production_time_unit (str): Üretim süresi birimi ('saat' veya 'gün')
     """
     query = """
-    INSERT INTO item (item_id, item_type, item_quantity_type, activity_status, demand_avg, demand_deviation, unit_cost, unit_price, additional_cost, currency)
-    VALUES (%s, %s, %s, %s, 0, 0, %s, %s, %s, %s)
+    INSERT INTO item (item_id, item_type, item_quantity_type, activity_status, demand_avg, demand_deviation, unit_cost, unit_price, additional_cost, currency, production_time_value, production_time_unit)
+    VALUES (%s, %s, %s, %s, 0, 0, %s, %s, %s, %s, %s, %s)
     """
-    params = (item_id, item_type, quantity_type, status, unit_cost, unit_price, additional_cost, currency)
+    params = (item_id, item_type, quantity_type, status, unit_cost, unit_price, additional_cost, currency, production_time_value, production_time_unit)
     return run_command(query, params)
 
 def search_items(item_id=None, item_type=None, status=None, limit=None, offset=None):
@@ -58,7 +60,7 @@ def search_items(item_id=None, item_type=None, status=None, limit=None, offset=N
         query = "SELECT * FROM item" + base_where + " ORDER BY item_id"
         return run_query(query, tuple(params))
 
-def update_item(item_id, item_type=None, quantity_type=None, status=None, unit_cost=None, unit_price=None, additional_cost=None, currency=None):
+def update_item(item_id, item_type=None, quantity_type=None, status=None, unit_cost=None, unit_price=None, additional_cost=None, currency=None, production_time_value=None, production_time_unit=None):
     """
     Ürün özelliklerini günceller.
     Değer gönderilmeyen (None) alanlar güncellenmez.
@@ -95,6 +97,14 @@ def update_item(item_id, item_type=None, quantity_type=None, status=None, unit_c
     if currency is not None:
         fields.append("currency = %s")
         params.append(currency)
+
+    if production_time_value is not None:
+        fields.append("production_time_value = %s")
+        params.append(production_time_value)
+
+    if production_time_unit is not None:
+        fields.append("production_time_unit = %s")
+        params.append(production_time_unit)
         
     if not fields:
         return False

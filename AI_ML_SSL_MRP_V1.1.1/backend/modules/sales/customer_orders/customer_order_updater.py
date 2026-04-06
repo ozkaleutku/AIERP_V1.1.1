@@ -76,8 +76,9 @@ def update_customer_order(order_id: int, updates: dict):
             try:
                 set_current_order_id(updated_order['id'])
                 due_date = updated_order.get('expected_delivery_date') or updated_order.get('order_date')
-                prod_time = updated_order.get('production_time_days') or 0
-                process_demand(updated_order['item_id'], float(updated_order['amount']), due_date, int(prod_time) if prod_time else 0)
+                # Manuel override: sipariş formundan girilen üretim süresi varsa onu ilet
+                prod_time_override = int(updated_order['production_time_days']) if updated_order.get('production_time_days') else None
+                process_demand(updated_order['item_id'], float(updated_order['amount']), due_date, prod_time_override)
                 
                 missing = get_missing_suppliers()
                 if missing:

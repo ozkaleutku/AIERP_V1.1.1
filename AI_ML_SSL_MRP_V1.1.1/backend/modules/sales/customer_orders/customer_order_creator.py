@@ -60,9 +60,10 @@ def create_customer_order(order_data: dict):
                  set_current_order_id(new_order['id'])
                  
                  due_date = new_order.get('expected_delivery_date') or new_order.get('order_date')
-                 prod_time = new_order.get('production_time_days') or 0
+                 # Manuel override: sipariş formundan girilen üretim süresi varsa onu ilet
+                 prod_time_override = int(new_order['production_time_days']) if new_order.get('production_time_days') else None
                  
-                 process_demand(new_order['item_id'], float(new_order['amount']), due_date, prod_time)
+                 process_demand(new_order['item_id'], float(new_order['amount']), due_date, prod_time_override)
                  
                  # Collect any items without suppliers
                  missing = get_missing_suppliers()

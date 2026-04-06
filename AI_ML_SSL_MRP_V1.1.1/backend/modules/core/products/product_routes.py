@@ -43,7 +43,9 @@ def create_product(body: ProductCreate, background_tasks: BackgroundTasks):
             unit_cost=body.unit_cost or 0,
             unit_price=body.unit_price or 0,
             additional_cost=body.additional_cost or 0,
-            currency=body.currency or 'TRY'
+            currency=body.currency or 'TRY',
+            production_time_value=body.production_time_value or 0,
+            production_time_unit=body.production_time_unit or 'saat'
         )
         background_tasks.add_task(recalculate_all_costs)
         return {"status": "success"}
@@ -62,7 +64,9 @@ def update_product_endpoint(item_id: str, body: ProductUpdate, background_tasks:
             unit_cost=body.unit_cost,
             unit_price=body.unit_price,
             additional_cost=body.additional_cost,
-            currency=body.currency
+            currency=body.currency,
+            production_time_value=body.production_time_value,
+            production_time_unit=body.production_time_unit
         )
         background_tasks.add_task(recalculate_all_costs)
         return {"status": "success"}
