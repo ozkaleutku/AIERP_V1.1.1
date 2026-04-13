@@ -11,11 +11,13 @@ from backend.logger import get_logger
 
 logger = get_logger(__name__)
 
+from backend.config import CORS_ORIGINS
+
 app = FastAPI(title="OptiStock AI - ERP MRP System")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +48,9 @@ def read_root():
     return {"message": "OptiStock AI - ERP MRP System API is Running (Modular)"}
 
 
+from backend.config import API_PORT, API_HOST, API_RELOAD
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    logger.info(f"Starting server on {API_HOST}:{API_PORT} (Reload: {API_RELOAD})")
+    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=API_RELOAD)

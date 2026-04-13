@@ -18,3 +18,14 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432")
 }
+
+# API Configuration
+API_PORT = int(os.getenv("API_PORT", "8000"))
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+API_RELOAD = os.getenv("API_RELOAD", "True").lower() == "true"
+
+# Logging Configuration
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Security Configuration
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
