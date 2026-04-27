@@ -20,6 +20,6 @@ def product_details(item_id: str):
     try:
          # İhtiyaca göre stok vb eklenebilir
          history = get_item_price_history(item_id)
-         return {"price_history": history}
+         return {"prices": history}
     except Exception as e:
         handle_db_error(e)

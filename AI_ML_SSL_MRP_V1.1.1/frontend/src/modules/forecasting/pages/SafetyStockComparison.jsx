@@ -153,10 +153,11 @@ const SafetyStockComparison = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const response = await api.get("/safety-stock/temporary");
+            const response = await api.get("/safety-stock/proposals");
+            const dataArr = response.data.data || response.data || [];
 
             // Initialize comparison data structure
-            const initial = response.data.map((item, index) => {
+            const initial = dataArr.map((item, index) => {
                 let manualInput = item.active_safety_stock !== undefined && item.active_safety_stock !== null ? item.active_safety_stock : "";
 
                 // Default to AI, unless we have a saved preference from the database

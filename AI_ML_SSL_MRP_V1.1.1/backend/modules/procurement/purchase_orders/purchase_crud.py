@@ -3,10 +3,10 @@ from backend.database.db_helper import run_query, run_command
 
 def create_purchase_order(item_id, supplier_id, amount, unit_price, expected_coming_date=None, currency="TRY"):
     query = """
-    INSERT INTO purchase (item_id, supplier_id, amount, unit_price, currency, status, expected_coming_date)
-    VALUES (%s, %s, %s, %s, %s, 'Bekleniyor', %s)
+    INSERT INTO purchase (item_id, supplier_id, amount, unit_price, expected_coming_date)
+    VALUES (%s, %s, %s, %s, %s)
     """
-    params = (item_id, supplier_id, amount, unit_price, currency, expected_coming_date)
+    params = (item_id, supplier_id, amount, unit_price, expected_coming_date)
     return run_command(query, params)
 
 def search_purchase_orders(item_id=None, supplier_id=None, status=None, limit=None, offset=None):
@@ -30,14 +30,14 @@ def search_purchase_orders(item_id=None, supplier_id=None, status=None, limit=No
          count_df = run_query(count_query, tuple(params))
          total = int(count_df.iloc[0]['total']) if not count_df.empty else 0
          
-         query = "SELECT * FROM purchase" + base_where + " ORDER BY date DESC, purchase_id DESC LIMIT %s OFFSET %s"
+         query = "SELECT * FROM purchase" + base_where + " ORDER BY purchase_date DESC, id DESC LIMIT %s OFFSET %s"
          params.append(limit)
          params.append(offset or 0)
          
          df = run_query(query, tuple(params))
          return df, total
     else:
-         query = "SELECT * FROM purchase" + base_where + " ORDER BY date DESC, purchase_id DESC"
+         query = "SELECT * FROM purchase" + base_where + " ORDER BY purchase_date DESC, id DESC"
          return run_query(query, tuple(params))
 
 def update_purchase_order_details(purchase_id, supplier_id=None, amount=None, expected_coming_date=None):
@@ -60,7 +60,7 @@ def update_purchase_order_details(purchase_id, supplier_id=None, amount=None, ex
     if not fields:
         return False
         
-    query = f"UPDATE purchase SET {', '.join(fields)} WHERE purchase_id = %s"
+    query = f"UPDATE purchase SET {', '.join(fields)} WHERE id = %s"
     params.append(purchase_id)
     
     return run_command(query, tuple(params))
@@ -68,26 +68,26 @@ def update_purchase_order_details(purchase_id, supplier_id=None, amount=None, ex
 def delete_purchase_order(purchase_id):
     """Siparişi tamamen siler (Sadece Bekleniyor statüsündekiler silinebilir)."""
     # Önce siparişin durumunu kontrol et
-    df = run_query("SELECT status FROM purchase WHERE purchase_id = %s", (purchase_id,))
+    df = run_query("SELECT status FROM purchase WHERE id = %s", (purchase_id,))
     if df.empty:
         raise ValueError("Sipariş bulunamadı.")
         
-    if df.iloc[0]['status'] == "Tamamlandı":
+    if df.iloc[0]['status'] == "Geldi":
         raise ValueError("Tamamlanmış siparişler silinemez.")
         
-    query = "DELETE FROM purchase WHERE purchase_id = %s AND status = 'Bekleniyor'"
+    query = "DELETE FROM purchase WHERE id = %s AND status = 'Bekleniyor'"
     return run_command(query, (purchase_id,))
 
 def fetch_order_for_receive(purchase_id):
-    df = run_query("SELECT item_id, amount, status FROM purchase WHERE purchase_id = %s", (purchase_id,))
+    df = run_query("SELECT item_id, amount, status FROM purchase WHERE id = %s", (purchase_id,))
     if df.empty:
          raise ValueError("Sipariş bulunamadı.")
     return df.iloc[0]
 
-def update_purchase_order_status(purchase_id, status, actual_coming_date=None, unit_price=None, amount=None):
-    """Statü ve gelme tarihi vb. bilgileri (Tamamlanırken) günceller."""
-    fields = ["status = %s"]
-    params = [status]
+def update_purchase_order_status(purchase_id, status=None, actual_coming_date=None, unit_price=None, amount=None):
+    """Gelme tarihi ve birim fiyat günceller. Status GENERATED olduğu için direkt set edilemez."""
+    fields = []
+    params = []
     
     if actual_coming_date is not None:
         fields.append("actual_coming_date = %s")
@@ -96,10 +96,13 @@ def update_purchase_order_status(purchase_id, status, actual_coming_date=None, u
         fields.append("unit_price = %s")
         params.append(unit_price)
     if amount is not None:
-        fields.append("amount = %s") # Teslim alınan miktar
+        fields.append("amount = %s")
         params.append(amount)
         
-    query = f"UPDATE purchase SET {', '.join(fields)} WHERE purchase_id = %s"
+    if not fields:
+        return False
+        
+    query = f"UPDATE purchase SET {', '.join(fields)} WHERE id = %s"
     params.append(purchase_id)
     
     return run_command(query, tuple(params))

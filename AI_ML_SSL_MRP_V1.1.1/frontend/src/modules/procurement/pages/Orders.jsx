@@ -27,7 +27,7 @@ const NewOrderModal = ({ onClose, onSubmit }) => {
     const fetchSuppliersData = async () => {
         try {
             const supRes = await api.get("/suppliers");
-            setAllSupplierItems(supRes.data);
+            setAllSupplierItems(supRes.data.data || supRes.data || []);
         } catch (error) {
             console.error("Error fetching suppliers:", error);
         }
@@ -258,7 +258,7 @@ const Orders = () => {
         setLoading(true);
         try {
             const response = await api.get("/orders");
-            setOrders(response.data);
+            setOrders(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching orders:", error);
         } finally {

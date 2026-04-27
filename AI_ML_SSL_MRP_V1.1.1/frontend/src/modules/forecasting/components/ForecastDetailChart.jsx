@@ -19,7 +19,7 @@ const ForecastDetailChart = ({ itemId, hideTable }) => {
         const fetchDetail = async () => {
             setLoading(true);
             try {
-                const res = await api.get(`/forecast/detail/${itemId}`);
+                const res = await api.get(`/forecast/${itemId}`);
                 setData(res.data);
             } catch (err) {
                 console.error("Forecast detail error:", err);

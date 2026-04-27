@@ -28,8 +28,8 @@ const SalesHistory = () => {
     const fetchSales = async () => {
         setLoading(true);
         try {
-            const response = await api.get("/sales");
-            setSales(response.data);
+            const response = await api.get("/sales", { params: { limit: 1000 } }); // Pagination varsa tümünü çek
+            setSales(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching sales:", error);
         } finally {

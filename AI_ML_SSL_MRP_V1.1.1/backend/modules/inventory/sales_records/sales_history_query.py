@@ -4,9 +4,8 @@ from backend.database.db_helper import run_query
 def get_all_sales_records(limit=None, offset=None):
      """
      Tüm satış geçmişi kayıtlarını (sayfalama destekli) getirir.
-     Ayrıca bu satışın eğer bir müşteri siparişi_id'si varsa (order_id), o siparişe dair 
-     bilgileri (ör: ne zaman teslim edilmesi gerekiyordu, asıl sipariş miktarı neydi vs)
-     sol birleştirmeyle (LEFT JOIN) çekebiliriz.
+     Eğer bu satışın bir müşteri siparişi (order_id) varsa, o siparişe dair
+     bilgileri LEFT JOIN ile çeker.
      """
      
      if limit is not None:

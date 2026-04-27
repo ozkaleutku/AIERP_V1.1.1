@@ -15,7 +15,7 @@ const ProductExpandedContent = ({ product, isApproved, editingKey, editAmount, s
     const [detailData, setDetailData] = useState(null);
 
     useEffect(() => {
-        api.get(`/forecast/detail/${product.item_id}`).then(res => setDetailData(res.data)).catch(console.error);
+        api.get(`/forecast/${product.item_id}`).then(res => setDetailData(res.data)).catch(console.error);
     }, [product.item_id]);
 
     const historyYears = useMemo(() => {
@@ -186,8 +186,8 @@ const DemandForecast = () => {
     const fetchForecasts = async () => {
         setLoading(true);
         try {
-            const response = await api.get("/forecast/temporary");
-            setForecasts(response.data);
+            const response = await api.get("/forecast");
+            setForecasts(response.data.forecast || response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching forecasts:", error);
         } finally {
@@ -199,7 +199,7 @@ const DemandForecast = () => {
         setCalculating(true);
         const toastId = toast.loading("Tahminler hesaplanıyor...");
         try {
-            await api.post("/forecast/calculate");
+            await api.post("/forecast/run-ai");
             await fetchForecasts();
             toast.success("Tahminler güncellendi.", { id: toastId });
         } catch (error) {

@@ -29,7 +29,18 @@ def create_tables():
                 CREATE TYPE quantity_type_enum AS ENUM ('gram', 'adet', 'litre');
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'movement_purpose_enum') THEN
-                CREATE TYPE movement_purpose_enum AS ENUM ('üretime_giden', 'satış_çıkışı', 'giriş', 'çıkış', 'iade');
+                -- Hareket nedenleri (Backend kodlarıyla uyumlu)
+                CREATE TYPE movement_purpose_enum AS ENUM (
+                    'satın_alma_girişi', 
+                    'üretim_çıkışı', 
+                    'üretim_girişi', 
+                    'satış_çıkışı', 
+                    'kalite_transferi',
+                    'üretime_giden', -- Eski uyumluluk için
+                    'giriş', 
+                    'çıkış', 
+                    'iade'
+                );
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'purchase_purpose_enum') THEN
                 CREATE TYPE purchase_purpose_enum AS ENUM ('emniyet_stoku_için', 'acil_sipariş', 'normal_sipariş');
@@ -171,10 +182,14 @@ def create_tables():
             item_id VARCHAR(20) REFERENCES item(item_id),
             amount DECIMAL(12, 2),
             unit_price DECIMAL(12, 2) DEFAULT 0,
-            date DATE
+            date DATE,
+            customer_name VARCHAR(100),
+            order_id INTEGER
         )
         """,
         "ALTER TABLE sales_out_history ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12, 2) DEFAULT 0",
+        "ALTER TABLE sales_out_history ADD COLUMN IF NOT EXISTS customer_name VARCHAR(100)",
+        "ALTER TABLE sales_out_history ADD COLUMN IF NOT EXISTS order_id INTEGER",
         
         # 6. prophet_table_history
         """
@@ -350,18 +365,41 @@ def create_tables():
         )
         """,
 
+        # 11.6.6. Simülasyon Planlı Envanter
+        # Simülasyon sırasında active_inventory'den kopyalanır,
+        # sonra her sipariş işlenirken düşülür. Gerçek stoku ETKİLEMEZ.
+        """
+        CREATE TABLE IF NOT EXISTS planned_inventory (
+            item_id VARCHAR(20) PRIMARY KEY REFERENCES item(item_id),
+            planned_stock DECIMAL(12, 5) DEFAULT 0
+        )
+        """,
+
         # 11.7. Sipariş Simülasyon Etkileri Takip Tablosu
         # Her müşteri siparişinin hangi kalemlerde ne kadar stok değişikliği yaptığını kaydeder
         # Sipariş silindiğinde bu etkiler geri alınır
-        # due_date: Bu malzemenin en geç hazır olması gereken tarih
         """
-        CREATE TABLE IF NOT EXISTS sim_order_effects (
+        CREATE TABLE IF NOT EXISTS order_simulation_effects (
             id SERIAL PRIMARY KEY,
             order_id INTEGER REFERENCES customer_orders(id) ON DELETE CASCADE,
             item_id VARCHAR(20) REFERENCES item(item_id),
-            amount_changed DECIMAL(12, 2),
-            due_date DATE,
+            amount DECIMAL(12, 5),
+            effect_type VARCHAR(50),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+
+        # 11.8. Sipariş Simülasyon Satın Alma Önerileri
+        # Simülasyon motorunun backward scheduling + BOM explosion sonucu ürettiği
+        # "bu tarihte bu ürünü sipariş ver" önerileri.
+        # Gerçek purchase tablosundan TAMAMEN BAĞIMSIZ bir tablodur.
+        """
+        CREATE TABLE IF NOT EXISTS purchase_simulation (
+            id SERIAL PRIMARY KEY,
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            supplier_id VARCHAR(20),
+            amount DECIMAL(12, 5),
+            order_date DATE
         )
         """,
         

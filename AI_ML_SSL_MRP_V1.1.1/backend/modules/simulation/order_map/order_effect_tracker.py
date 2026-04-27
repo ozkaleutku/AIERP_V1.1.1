@@ -73,18 +73,18 @@ def reverse_order_effects(order_id: int):
                  pass
                  
              elif e_type == 'Purchase_Recommended':
-                 # Satın alma önerisi (Henüz Bekleniyor olan orderlar) var mı bul, ve düş.
+                 # Simülasyon satın alma önerisi — purchase_simulation tablosundan düş
                  cur.execute("""
-                     UPDATE purchase 
+                     UPDATE purchase_simulation 
                      SET amount = amount - %s 
-                     WHERE item_id = %s AND status = 'Bekleniyor' 
+                     WHERE item_id = %s 
                      AND id IN (
-                         SELECT id FROM purchase WHERE item_id = %s AND status = 'Bekleniyor' ORDER BY date DESC LIMIT 1
+                         SELECT id FROM purchase_simulation WHERE item_id = %s ORDER BY id DESC LIMIT 1
                      )
                  """, (amount, item_id, item_id))
                  
                  # Eğer miktar <= 0 olduysa öneriyi sil
-                 cur.execute("DELETE FROM purchase WHERE item_id = %s AND status = 'Bekleniyor' AND amount <= 0", (item_id,))
+                 cur.execute("DELETE FROM purchase_simulation WHERE item_id = %s AND amount <= 0", (item_id,))
 
          # 2. Etkileri kayıt defterinden sil
          cur.execute("DELETE FROM order_simulation_effects WHERE order_id = %s", (order_id,))

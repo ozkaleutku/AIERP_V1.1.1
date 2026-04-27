@@ -42,8 +42,8 @@ const SafetyStock = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const response = await api.get("/safety-stock");
-            setData(response.data);
+            const response = await api.get("/safety-stock/final");
+            setData(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching safety stock data:", error);
         } finally {
@@ -57,7 +57,7 @@ const SafetyStock = () => {
         setCalculating(true);
         const toastId = toast.loading("AI hesaplaması başlatılıyor...");
         try {
-            await api.post("/safety-stock/calculate");
+            await api.post("/safety-stock/run-ml");
             toast.success("Hesaplama tamamlandı. Karşılaştırma sayfasına yönlendiriliyorsunuz.", { id: toastId });
             navigate("/safety-stock/compare");
         } catch (error) {

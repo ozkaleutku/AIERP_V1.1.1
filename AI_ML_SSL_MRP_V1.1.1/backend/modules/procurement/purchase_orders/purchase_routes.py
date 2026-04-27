@@ -28,7 +28,7 @@ def get_orders(
         )
         
         if not df.empty:
-             for col in ['date', 'expected_coming_date', 'actual_coming_date']:
+             for col in ['purchase_date', 'expected_coming_date', 'actual_coming_date']:
                   if col in df.columns:
                       df[col] = df[col].astype(str)
                       
@@ -67,7 +67,7 @@ def create_order(body: OrderCreate):
 @router.put("/api/orders/{purchase_id}")
 def update_order_status(purchase_id: int, body: OrderUpdate):
     try:
-        if body.status == 'Tamamlandı':
+        if body.status == 'Tamamlandı' or body.status == 'Geldi':
              # Siparişi teslim al ve stok hareketini oluştur
              receive_purchase_order(
                   purchase_id, 

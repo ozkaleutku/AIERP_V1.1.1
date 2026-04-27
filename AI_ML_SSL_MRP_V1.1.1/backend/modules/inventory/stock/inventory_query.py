@@ -25,14 +25,16 @@ def get_inventory_with_details(item_id=None, item_type=None, limit=None, offset=
         params.append(item_type)
 
     if limit is not None:
-        count_query = "SELECT COUNT(*) as total FROM active_inventory a RIGHT JOIN item i ON a.item_id = i.item_id" + base_where
+        count_query = "SELECT COUNT(*) as total FROM item i LEFT JOIN active_inventory a ON i.item_id = a.item_id" + base_where
         count_df = run_query(count_query, tuple(params))
         total = int(count_df.iloc[0]['total']) if not count_df.empty else 0
 
         query = f"""
-        SELECT i.item_id, i.item_type, i.item_quantity_type, i.activity_status, COALESCE(a.current_stock, 0) as current_stock
-        FROM active_inventory a
-        RIGHT JOIN item i ON a.item_id = i.item_id
+        SELECT i.item_id, i.item_type, i.item_quantity_type as unit, i.activity_status, 
+               COALESCE(a.current_stock, 0) as amount, a.location_id, l.location_name
+        FROM item i
+        LEFT JOIN active_inventory a ON i.item_id = a.item_id
+        LEFT JOIN warehouse_location l ON a.location_id = l.location_id
         {base_where}
         ORDER BY i.item_id
         LIMIT %s OFFSET %s
@@ -43,9 +45,11 @@ def get_inventory_with_details(item_id=None, item_type=None, limit=None, offset=
         return df_inv, total
     else:
         query = f"""
-        SELECT i.item_id, i.item_type, i.item_quantity_type, i.activity_status, COALESCE(a.current_stock, 0) as current_stock
-        FROM active_inventory a
-        RIGHT JOIN item i ON a.item_id = i.item_id
+        SELECT i.item_id, i.item_type, i.item_quantity_type as unit, i.activity_status, 
+               COALESCE(a.current_stock, 0) as amount, a.location_id, l.location_name
+        FROM item i
+        LEFT JOIN active_inventory a ON i.item_id = a.item_id
+        LEFT JOIN warehouse_location l ON a.location_id = l.location_id
         {base_where}
         ORDER BY i.item_id
         """

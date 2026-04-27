@@ -14,7 +14,7 @@ def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, s
     """
     # 1. Purpose'a göre varsayılan lokasyon ayarları (Güvenlik için)
     if purpose == 'satın_alma_girişi':
-        target_location = 'ANA_DEPO'
+        target_location = 'GİRİŞ_KALİTE'
         source_location = None
     elif purpose == 'satış_çıkışı':
         source_location = 'ANA_DEPO'
@@ -33,13 +33,15 @@ def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, s
          tracking_seq = get_next_tracking_seq(order_id, item_id)
          tracking_code = f"S{order_id}-{item_id}-{tracking_seq}"
 
+    is_completed = (status == 'Tamamlandı')
+    
     query = """
     INSERT INTO stock_movement 
-    (item_id, amount, purpose, date, order_id, source_location_id, target_location_id, status, tracking_code, tracking_seq)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    (item_id, amount, purpose, date, order_id, source_location_id, target_location_id, is_completed, tracking_code)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id
     """
-    params = (item_id, amount, purpose, movement_date, order_id, source_location, target_location, status, tracking_code, tracking_seq)
+    params = (item_id, amount, purpose, movement_date, order_id, source_location, target_location, is_completed, tracking_code)
     
     # 2. Hareketi veritabanına ekle
     from backend.database.db_helper import get_db_connection, release_db_connection

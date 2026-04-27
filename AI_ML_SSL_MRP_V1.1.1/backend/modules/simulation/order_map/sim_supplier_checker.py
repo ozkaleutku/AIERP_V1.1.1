@@ -15,7 +15,7 @@ def get_missing_suppliers():
     WITH required_items AS (
         SELECT DISTINCT child_id as item_id FROM bom WHERE activity_status = 'Aktif'
         UNION
-        SELECT item_id FROM item WHERE item_type IN ('hammadde', 'ticari_mal') AND activity_status = 'Aktif'
+        SELECT item_id FROM item WHERE item_type IN ('hammadde') AND activity_status = 'Aktif'
     )
     SELECT r.item_id 
     FROM required_items r

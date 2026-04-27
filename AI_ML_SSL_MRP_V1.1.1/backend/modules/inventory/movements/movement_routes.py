@@ -27,8 +27,11 @@ def get_stock_movements(
             limit=limit, 
             offset=offset
         )
+        if not df.empty and 'date' in df.columns:
+            df['date'] = df['date'].astype(str)
+            
         return {
-            "data": df.to_dict(orient="records"),
+            "data": df.fillna("").to_dict(orient="records"),
             "total": total,
             "page": page,
             "limit": limit,

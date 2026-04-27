@@ -243,7 +243,7 @@ const CustomerOrders = () => {
         setLoading(true);
         try {
             const response = await api.get("/customer-orders");
-            setOrders(response.data);
+            setOrders(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error:", error);
         } finally {

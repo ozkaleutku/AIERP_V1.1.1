@@ -91,7 +91,7 @@ const Inventory = () => {
     const fetchMovements = async () => {
         try {
             const response = await api.get("/stock-movements");
-            setMovements(response.data);
+            setMovements(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching stock movements:", error);
         }
@@ -100,7 +100,7 @@ const Inventory = () => {
     const fetchLocations = async () => {
         try {
             const response = await api.get("/locations");
-            setLocations(response.data);
+            setLocations(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching locations:", error);
         }
@@ -109,7 +109,7 @@ const Inventory = () => {
     const fetchProducts = async () => {
         try {
             const response = await api.get("/products?limit=10000");
-            setProducts(response.data.data || []);
+            setProducts(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching products:", error);
         }
@@ -119,7 +119,7 @@ const Inventory = () => {
         setLoading(true);
         try {
             const response = await api.get("/inventory?limit=10000");
-            setInventory(response.data.data);
+            setInventory(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching inventory:", error);
         } finally {
@@ -130,7 +130,8 @@ const Inventory = () => {
     const fetchActiveOrders = async () => {
         try {
             const response = await api.get("/customer-orders");
-            const active = response.data.filter(o => ['Bekleniyor', 'Üretimde', 'Hazır'].includes(o.status));
+            const dataArr = response.data.data || response.data || [];
+            const active = dataArr.filter(o => ['Bekleniyor', 'Üretimde', 'Hazır'].includes(o.status));
             setActiveOrders(active);
         } catch (error) {
             console.error("Error fetching orders:", error);
@@ -138,22 +139,27 @@ const Inventory = () => {
     };
 
     const groupedInventory = useMemo(() => {
+        if (!Array.isArray(inventory)) return [];
         const groups = {};
         inventory.forEach(item => {
+            if (!item || !item.item_id) return;
             if (!groups[item.item_id]) {
                 groups[item.item_id] = {
                     item_id: item.item_id,
                     total: 0,
-                    unit: item.unit,
+                    unit: item.unit || item.item_quantity_type || "",
                     locations: []
                 };
             }
-            groups[item.item_id].locations.push({
-                location_id: item.location_id,
-                location_name: item.location_name,
-                amount: parseFloat(item.amount) || 0
-            });
-            groups[item.item_id].total += parseFloat(item.amount) || 0;
+            const amt = parseFloat(item.amount) || 0;
+            if (item.location_id || item.location_name) {
+                groups[item.item_id].locations.push({
+                    location_id: item.location_id || "UNKNOWN",
+                    location_name: item.location_name || "Belirtilmemiş",
+                    amount: amt
+                });
+            }
+            groups[item.item_id].total += amt;
         });
         return Object.values(groups);
     }, [inventory]);

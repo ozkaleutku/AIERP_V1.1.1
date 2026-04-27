@@ -23,8 +23,8 @@ def get_planned_stock(item_id):
         return float(df.iloc[0]['planned_stock'])
         
     # Mevcut db active_inventory
-    df_active = run_query("SELECT current_stock FROM active_inventory WHERE item_id = %s", (item_id,))
-    stock = float(df_active.iloc[0]['current_stock']) if not df_active.empty else 0.0
+    df_active = run_query("SELECT SUM(current_stock) as current_stock FROM active_inventory WHERE item_id = %s", (item_id,))
+    stock = float(df_active.iloc[0]['current_stock']) if not df_active.empty and df_active.iloc[0]['current_stock'] is not None else 0.0
     
     # Initialize
     run_command("INSERT INTO planned_inventory (item_id, planned_stock) VALUES (%s, %s)", (item_id, stock))
@@ -93,16 +93,17 @@ def create_purchase_recommendation(item_id, amount_needed, due_date):
          supplier_id = df_supplier.iloc[0]['supplier_id']
          leadtime = int(df_supplier.iloc[0]['given_leadtime'] or leadtime)
          
-    expected_coming_date = None
+    # order_date (sipariş verilmesi gereken tarih) = due_date - leadtime
+    order_date = None
     if due_date:
-        expected_coming_date = due_date - timedelta(days=leadtime)
+        order_date = due_date - timedelta(days=leadtime)
         
-    # Create the purchase requirement (Öneri)
+    # Simülasyon tablosuna yaz (gerçek purchase tablosuna DEĞİL)
     query = """
-    INSERT INTO purchase (item_id, supplier_id, amount, status, expected_coming_date)
-    VALUES (%s, %s, %s, 'Bekleniyor', %s)
+    INSERT INTO purchase_simulation (item_id, supplier_id, amount, order_date)
+    VALUES (%s, %s, %s, %s)
     """
-    run_command(query, (item_id, supplier_id, amount_needed, expected_coming_date))
+    run_command(query, (item_id, supplier_id, amount_needed, order_date))
     
     track_sim_effect(item_id, amount_needed, 'Purchase_Recommended')
 

@@ -234,7 +234,7 @@ const Suppliers = () => {
         setLoading(true);
         try {
             const response = await api.get("/suppliers");
-            setSuppliers(response.data);
+            setSuppliers(response.data.data || response.data || []);
         } catch (error) {
             console.error("Error fetching suppliers:", error);
         } finally {

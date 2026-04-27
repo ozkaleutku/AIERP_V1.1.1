@@ -20,7 +20,7 @@ def get_missing_suppliers():
         -- 2. Ya da direkt hammadde veya ticari mal olanlar (Hiç BOM'da olmasalar bile)
         SELECT item_id
         FROM item
-        WHERE item_type IN ('hammadde', 'ticari_mal') AND activity_status = 'Aktif'
+        WHERE item_type IN ('hammadde') AND activity_status = 'Aktif'
     )
     SELECT r.item_id, i.item_type
     FROM required_items r

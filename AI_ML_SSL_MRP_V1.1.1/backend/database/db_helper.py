@@ -62,14 +62,16 @@ def release_db_connection(conn):
         except Exception as e:
             logger.warning(f"Error releasing connection: {e}")
 
+import warnings
+
 def run_query(query, params=None):
     """SELECT sorguları için (DataFrame döner)"""
     conn = get_db_connection()
     if conn:
         try:
-            # Pandas read_sql uses the connection context/cursor internally
-            # but usually doesn't close the connection automatically unless specified
-            df = pd.read_sql_query(query, conn, params=params)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', UserWarning)
+                df = pd.read_sql_query(query, conn, params=params)
             return df
         except Exception as e:
             logger.error(f"Query Error: {e}")
