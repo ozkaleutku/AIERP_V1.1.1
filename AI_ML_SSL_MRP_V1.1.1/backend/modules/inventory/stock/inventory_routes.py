@@ -38,11 +38,18 @@ def update_inventory_route(item_id: str, body: InventoryUpdate):
 
 @router.get("/api/locations")
 def get_locations():
-    """Tüm lokasyonları getirir (API şimdilik sabit / opsiyonel db eklenebilir)"""
-    # Sabit konumları döndürüyoruz. Gerekirse ileride database'den okunabilir.
-    return {
-        "data": [
-            {"id": "ANA_DEPO", "name": "Ana Depo", "type": "depo"},
-            {"id": "ÜRETİM", "name": "Üretim Sahası", "type": "saha"}
-        ]
-    }
+    """Tüm lokasyonları veritabanından getirir."""
+    from backend.database.db_helper import get_db_connection, release_db_connection
+    from psycopg2.extras import RealDictCursor
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT location_id as id, location_name as name FROM warehouse_location WHERE is_active = true")
+        locs = cur.fetchall()
+        return {"data": [dict(row) for row in locs]}
+    except Exception as e:
+        handle_db_error(e)
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        release_db_connection(conn)

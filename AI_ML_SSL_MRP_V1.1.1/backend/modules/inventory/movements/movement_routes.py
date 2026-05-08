@@ -52,7 +52,9 @@ def create_stock_movement(body: StockMovementCreate):
              body.purpose, 
              body.date, 
              body.order_id,
-             # Frontend'den gelmiyorsa creator içindeki logic handle eder
+             source_location=body.source_location_id,
+             target_location=body.target_location_id,
+             tracking_code=body.tracking_code,
              status=status
          )
          return {"status": "success"}

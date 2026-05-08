@@ -6,32 +6,35 @@ from backend.logger import get_logger
 logger = get_logger(__name__)
 
 
-def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, source_location='ANA_DEPO', target_location='ANA_DEPO', status='Tamamlandı'):
+def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, source_location='ANA_DEPO', target_location='ANA_DEPO', status='Tamamlandı', tracking_code=None):
     """
     Genel stok hareketi ekler.
     Eğer purpose = 'satın_alma_girişi' ise target_location='ANA_DEPO', source_location=NULL yapılır.
     Eğer purpose = 'üretim_çıkışı' ise source_location='ANA_DEPO', target_location='ÜRETİM' yapılır. vb.
     """
-    # 1. Purpose'a göre varsayılan lokasyon ayarları (Güvenlik için)
+    # 1. Purpose'a göre varsayılan lokasyon ayarları (Eğer boş gönderilmişse)
     if purpose == 'satın_alma_girişi':
-        target_location = 'GİRİŞ_KALİTE'
-        source_location = None
+        target_location = target_location or 'GİRİŞ_KALİTE'
+        source_location = source_location or None
     elif purpose == 'satış_çıkışı':
-        source_location = 'ANA_DEPO'
-        target_location = None
-    elif purpose == 'üretim_çıkışı': # Depodan üretim sahasına
-        source_location = 'ANA_DEPO'
-        target_location = 'ÜRETİM'
-    elif purpose == 'üretim_girişi': # Üretim sahasından depoya (Mamül girişi veya hammadde iadesi)
-        source_location = 'ÜRETİM'
-        target_location = 'ANA_DEPO'
+        source_location = source_location or 'ANA_DEPO'
+        target_location = target_location or None
+    elif purpose in ('üretim_çıkışı', 'üretime_giden'): # Depodan üretim sahasına
+        source_location = source_location or 'ANA_DEPO'
+        target_location = target_location or 'ÜRETİM'
+    elif purpose in ('üretim_girişi', 'giriş'): # Üretim sahasından depoya (Mamül girişi veya hammadde iadesi)
+        source_location = source_location or ('ÜRETİM' if purpose == 'üretim_girişi' else 'GİRİŞ_KALİTE')
+        target_location = target_location or 'ANA_DEPO'
+    elif purpose == 'iade':
+        source_location = source_location or 'ÜRETİM'
+        target_location = target_location or 'ANA_DEPO'
     
     # Tracking Code Oluşturma
-    tracking_code = None
-    tracking_seq = None
-    if order_id:
-         tracking_seq = get_next_tracking_seq(order_id, item_id)
-         tracking_code = f"S{order_id}-{item_id}-{tracking_seq}"
+    if not tracking_code:
+        tracking_seq = None
+        if order_id:
+             tracking_seq = get_next_tracking_seq(order_id, item_id)
+             tracking_code = f"S{order_id}-{item_id}-{tracking_seq}"
 
     is_completed = (status == 'Tamamlandı')
     
@@ -52,9 +55,15 @@ def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, s
          cur.execute(query, params)
          new_movement_id = cur.fetchone()['id']
          
-         # 3. Eğer hareket 'Tamamlandı' ise aktif stok bakiyesini anında güncelle
-         if status == 'Tamamlandı':
-             _update_active_inventory(cur, item_id, amount, source_location, target_location)
+         # Veritabanı trigger'ı 'update_active_inventory' (database_setup.py) stokları otomatik günceller.
+         # Bu nedenle burada tekrar _update_active_inventory çağırmıyoruz (veya call fail oluyordu eski şema yüzünden).
+             
+         if order_id:
+             cur.execute("SELECT status FROM customer_orders WHERE id = %s", (order_id,))
+             order_row = cur.fetchone()
+             if order_row and order_row['status'] == 'Bekleniyor':
+                 cur.execute("UPDATE customer_orders SET status = 'Üretimde' WHERE id = %s", (order_id,))
+                 logger.info(f"Order {order_id} status updated to 'Üretimde' after movement creation.")
              
          conn.commit()
          logger.info(f"Stock movement recorded: {item_id}, {amount}, {purpose}, {status}")
@@ -67,28 +76,4 @@ def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, s
          cur.close()
          release_db_connection(conn)
 
-def _update_active_inventory(cur, item_id, amount, source_location, target_location):
-     """
-     Yardımcı fonksiyon: Hareket tamamlandığında 'active_inventory' tablosunu günceller.
-     Sadece ANA_DEPO etkilenir.
-     """
-     if target_location == 'ANA_DEPO':
-         # ANA_DEPO'ya giriş
-         cur.execute("""
-              INSERT INTO active_inventory (item_id, current_stock, last_updated)
-              VALUES (%s, %s, CURRENT_TIMESTAMP)
-              ON CONFLICT (item_id) DO UPDATE SET 
-                   current_stock = active_inventory.current_stock + EXCLUDED.current_stock,
-                   last_updated = CURRENT_TIMESTAMP
-         """, (item_id, amount))
-         
-     if source_location == 'ANA_DEPO':
-         # ANA_DEPO'dan çıkış
-         cur.execute("""
-              INSERT INTO active_inventory (item_id, current_stock, last_updated)
-              VALUES (%s, %s, CURRENT_TIMESTAMP)
-              ON CONFLICT (item_id) DO UPDATE SET 
-                   current_stock = active_inventory.current_stock - EXCLUDED.current_stock,
-                   last_updated = CURRENT_TIMESTAMP
-         """, (item_id, amount))
-         # Not: Excluded value her zaman pozitiftir (amount pozitiftir), - işaretiyle çıkarıyoruz.
+

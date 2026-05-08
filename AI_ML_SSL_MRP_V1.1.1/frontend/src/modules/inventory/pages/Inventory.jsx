@@ -590,10 +590,16 @@ const Inventory = () => {
                                         onChange={e => setMovementForm({ ...movementForm, source_location_id: e.target.value })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                     >
-                                        <option value="">-- Dışarıdan --</option>
-                                        {locations.map(loc => (
-                                            <option key={loc.location_id} value={loc.location_id}>{loc.location_name}</option>
-                                        ))}
+                                        <option value="" className="text-black bg-white">-- Dışarıdan --</option>
+                                        {Array.isArray(locations) && locations.map((loc, idx) => {
+                                            const val = loc?.id || loc?.location_id || `loc-${idx}`;
+                                            const label = loc?.name || loc?.location_name || (typeof loc === 'object' ? JSON.stringify(loc) : String(loc));
+                                            return (
+                                                <option key={`src-${val}`} value={val} className="text-black bg-white">
+                                                    {label}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
                                 <div>
@@ -603,10 +609,16 @@ const Inventory = () => {
                                         onChange={e => setMovementForm({ ...movementForm, target_location_id: e.target.value })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                     >
-                                        <option value="">-- Dışarıya --</option>
-                                        {locations.map(loc => (
-                                            <option key={loc.location_id} value={loc.location_id}>{loc.location_name}</option>
-                                        ))}
+                                        <option value="" className="text-black bg-white">-- Dışarıya --</option>
+                                        {Array.isArray(locations) && locations.map((loc, idx) => {
+                                            const val = loc?.id || loc?.location_id || `loc-${idx}`;
+                                            const label = loc?.name || loc?.location_name || (typeof loc === 'object' ? JSON.stringify(loc) : String(loc));
+                                            return (
+                                                <option key={`tgt-${val}`} value={val} className="text-black bg-white">
+                                                    {label}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
                             </div>
