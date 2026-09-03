@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks
 from typing import Optional
 
 from backend.modules.core.products.product_schemas import ProductCreate, ProductUpdate
-from backend.modules.core.products.product_crud import search_items, create_item, update_item
+from backend.modules.core.products.product_crud import search_items, create_item, update_item, hard_delete_item, soft_delete_item
 from backend.modules.core.cost_calculation.cost_calculator import recalculate_all_costs
 from backend.shared.utils.error_handler import handle_db_error
 
@@ -70,6 +70,16 @@ def update_product_endpoint(item_id: str, body: ProductUpdate, background_tasks:
         )
         background_tasks.add_task(recalculate_all_costs)
         return {"status": "success"}
+    except Exception as e:
+        handle_db_error(e)
+
+
+@router.delete("/api/products/{item_id}")
+def delete_product_endpoint(item_id: str, background_tasks: BackgroundTasks):
+    try:
+        hard_delete_item(item_id)
+        background_tasks.add_task(recalculate_all_costs)
+        return {"status": "success", "message": f"{item_id} başarıyla silindi."}
     except Exception as e:
         handle_db_error(e)
 

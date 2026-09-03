@@ -11,7 +11,7 @@ const Layout = () => {
                 </main>
                 <footer className="w-full py-4 shrink-0 flex items-center justify-center">
                     <div className="flex items-center gap-2 text-[11px] text-gray-400/40 hover:text-gray-400/80 transition-colors duration-500 select-none">
-                        <span className="font-semibold tracking-widest uppercase">OptiStock AI</span>
+                        <span className="font-semibold tracking-widest uppercase">AIERP</span>
                         <div className="w-1 h-1 rounded-full bg-gray-300/30"></div>
                         <span className="font-mono tracking-tight">Developed by Utku Altan Özkale</span>
                     </div>

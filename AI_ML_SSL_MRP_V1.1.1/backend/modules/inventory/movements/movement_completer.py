@@ -9,6 +9,8 @@ def mark_movement_completed(movement_id: int):
     'Bekliyor' statüsündeki bir hareketi 'Tamamlandı' yapar ve aktif stoğu günceller.
     Ayrıca eğer bu bir müşteri siparişi çıkış hareketi ise ve siparişteki miktar tamamlandıysa
     sipariş durumunu günceller.
+    
+    NOT: stock_movement tablosunda 'status' sütunu yok, 'is_completed' BOOLEAN kullanılıyor.
     """
     from psycopg2.extras import RealDictCursor
     conn = get_db_connection()
@@ -22,23 +24,13 @@ def mark_movement_completed(movement_id: int):
          if not movement:
              raise ValueError("Hareket bulunamadı.")
              
-         if movement['status'] == 'Tamamlandı':
+         if movement['is_completed']:
              return True # Zaten tamamlanmış
              
-         # 2. Hareketi güncelle
-         cur.execute("UPDATE stock_movement SET status = 'Tamamlandı' WHERE id = %s", (movement_id,))
+         # 2. Hareketi güncelle (is_completed kullan, status sütunu yok)
+         cur.execute("UPDATE stock_movement SET is_completed = TRUE WHERE id = %s", (movement_id,))
          
-         # 3. Aktif Stoğu Güncelle (ANA_DEPO için)
-         from backend.modules.inventory.movements.movement_creator import _update_active_inventory
-         _update_active_inventory(
-             cur, 
-             movement['item_id'], 
-             movement['amount'], 
-             movement['source_location_id'], 
-             movement['target_location_id']
-         )
-         
-         # 4. Müşteri Siparişi Mantığı (Paketleme/Sevkiyat durumu için)
+         # 3. Müşteri Siparişi Mantığı (Paketleme/Sevkiyat durumu için)
          if movement['purpose'] == 'üretim_çıkışı' and movement['order_id']:
              order_id = movement['order_id']
              item_id = movement['item_id']
@@ -47,7 +39,7 @@ def mark_movement_completed(movement_id: int):
              cur.execute("""
                  SELECT SUM(amount) as total_shipped 
                  FROM stock_movement 
-                 WHERE order_id = %s AND item_id = %s AND purpose = 'üretim_çıkışı' AND status = 'Tamamlandı'
+                 WHERE order_id = %s AND item_id = %s AND purpose = 'üretim_çıkışı' AND is_completed = TRUE
              """, (order_id, item_id))
              
              total_shipped = cur.fetchone()['total_shipped'] or 0
@@ -60,9 +52,8 @@ def mark_movement_completed(movement_id: int):
                   if order['status'] != 'Sevk Edildi':
                       cur.execute("UPDATE customer_orders SET status = 'Hazır' WHERE id = %s", (order_id,))
                       
-         # 5. Order Material Consumption Mantığı
+         # 4. Order Material Consumption Mantığı
          if movement['purpose'] == 'üretim_çıkışı' and movement['order_id'] and movement['target_location_id'] == 'ÜRETİM':
-              # Order IDsine ait order_material_consumption tablosunu güncelle
               cur.execute("""
                    INSERT INTO order_material_consumption (order_id, item_id, amount)
                    VALUES (%s, %s, %s)

@@ -224,13 +224,15 @@ const SafetyStockComparison = () => {
     const handleRowApprove = async (row) => {
         const tid = toast.loading("Onaylanıyor...");
         try {
-            await api.post("/safety-stock/approve", [{
-                item_id: row.item_id,
-                date: row.date,
-                amount: row.finalAmount,
-                item_quantity_type: row.item_quantity_type,
-                preference: row.preference
-            }]);
+            await api.post("/safety-stock/approve", {
+                items: [{
+                    item_id: row.item_id,
+                    date: row.date,
+                    amount: row.finalAmount,
+                    item_quantity_type: row.item_quantity_type,
+                    preference: row.preference
+                }]
+            });
             toast.success("Onaylandı!", { id: tid });
 
             // Update state locally
@@ -253,7 +255,7 @@ const SafetyStockComparison = () => {
 
         const toastId = toast.loading("Emniyet stokları güncelleniyor...");
         try {
-            await api.post("/safety-stock/approve", payload);
+            await api.post("/safety-stock/approve", { items: payload });
             toast.success("Emniyet stokları başarıyla güncellendi!", { id: toastId });
             // Mark all as approved
             setComparisonData(prev => prev.map(r => ({ ...r, isApproved: true })));

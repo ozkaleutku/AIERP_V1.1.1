@@ -1,13 +1,13 @@
 from backend.database.db_helper import run_query, run_command
 
 
-def add_supplier_item(item_id, supplier_id, amount, given_leadtime, status='Aktif'):
+def add_supplier_item(item_id, supplier_id, given_leadtime, given_leadtime_deviation=0, lot_size=0, min_size=0, max_size=0, calculated=False, status='Aktif'):
     """Ürüne tedarikçi ekler."""
     query = """
-    INSERT INTO supplier_item (item_id, supplier_id, amount, given_leadtime, activity_status)
-    VALUES (%s, %s, %s, %s, %s)
+    INSERT INTO supplier_item (item_id, supplier_id, given_leadtime, given_leadtime_deviation, lot_size, min_size, max_size, calculated, activity_status)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
-    params = (item_id, supplier_id, amount, given_leadtime, status)
+    params = (item_id, supplier_id, given_leadtime, given_leadtime_deviation, lot_size, min_size, max_size, calculated, status)
     return run_command(query, params)
 
 def search_supplier_items(item_id=None, supplier_id=None, status=None, limit=None, offset=None):
@@ -42,18 +42,30 @@ def search_supplier_items(item_id=None, supplier_id=None, status=None, limit=Non
          query = "SELECT * FROM supplier_item" + base_where + " ORDER BY item_id, supplier_id"
          return run_query(query, tuple(params))
 
-def update_supplier_item(item_id, supplier_id, amount=None, given_leadtime=None, calculated=None, status=None):
+def update_supplier_item(item_id, supplier_id, given_leadtime=None, given_leadtime_deviation=None, lot_size=None, min_size=None, max_size=None, calculated=None, status=None):
     """Tedarikçi-Ürün ilişkisini günceller."""
     fields = []
     params = []
     
-    if amount is not None:
-        fields.append("amount = %s")
-        params.append(amount)
-        
     if given_leadtime is not None:
         fields.append("given_leadtime = %s")
         params.append(given_leadtime)
+
+    if given_leadtime_deviation is not None:
+        fields.append("given_leadtime_deviation = %s")
+        params.append(given_leadtime_deviation)
+
+    if lot_size is not None:
+        fields.append("lot_size = %s")
+        params.append(lot_size)
+
+    if min_size is not None:
+        fields.append("min_size = %s")
+        params.append(min_size)
+
+    if max_size is not None:
+        fields.append("max_size = %s")
+        params.append(max_size)
         
     if calculated is not None:
         fields.append("calculated = %s")

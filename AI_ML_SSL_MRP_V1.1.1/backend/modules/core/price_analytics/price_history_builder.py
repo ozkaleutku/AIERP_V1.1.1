@@ -14,7 +14,7 @@ def get_item_price_history(item_id: str):
     SELECT purchase_date as date, 
            unit_price as purchase_price
     FROM purchase
-    WHERE item_id = %s AND status = 'Tamamlandı'
+    WHERE item_id = %s AND status = 'Geldi'
     """
     df_purchase = run_query(purchase_query, (item_id,))
     

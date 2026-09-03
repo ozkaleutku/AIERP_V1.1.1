@@ -11,8 +11,11 @@ def rebuild_simulation_from_scratch():
     """
     Sistemi sıfırlar (planned_inventory = active_inventory) ve bekleyen
     tüm siparişleri baştan sona simüle eder. Ağırdır ancak %100 doğruluk sağlar.
+    YENİ MANTIK: Forecast Consumption & Safety Stock Entegrasyonu!
     """
     logger.info("Rebuilding entire simulation from scratch...")
+    from datetime import date
+    import pandas as pd
     
     # 1. Reset Planned Inventory from Active Inventory
     run_command("TRUNCATE TABLE planned_inventory")
@@ -22,37 +25,119 @@ def rebuild_simulation_from_scratch():
     GROUP BY item_id
     """)
     
-    # 2. Simülasyon satın alma önerilerini sıfırla (gerçek purchase tablosuna DOKUNMAZ)
+    # 1.5. Add pending Purchase Orders to Planned Inventory
+    run_command("""
+    INSERT INTO planned_inventory (item_id, planned_stock)
+    SELECT item_id, SUM(amount) FROM purchase
+    WHERE status = 'Bekleniyor'
+    GROUP BY item_id
+    ON CONFLICT (item_id) DO UPDATE SET 
+        planned_stock = planned_inventory.planned_stock + EXCLUDED.planned_stock
+    """)
+    
+    # 1.75. Güvenlik Stoğunu Düş (MRP motoru eksilen güvenlik stoğunu sipariş etmeye çalışsın)
+    # Eğer tablo yoksa hata vermemesi için try-except kullanabiliriz ama tablolar mevcut.
+    try:
+        run_command("""
+        INSERT INTO planned_inventory (item_id, planned_stock)
+        SELECT item_id, -safety_stock FROM final_safety_stock WHERE safety_stock > 0
+        ON CONFLICT (item_id) DO UPDATE SET 
+            planned_stock = planned_inventory.planned_stock - EXCLUDED.planned_stock
+        """)
+        logger.info("Safety stock levels applied to planned inventory.")
+    except Exception as e:
+        logger.error(f"Error applying safety stock: {e}")
+    
+    # 2. Simülasyon satın alma önerilerini sıfırla
     run_command("TRUNCATE TABLE purchase_simulation")
     
     # 3. Clear all Effect tracking logs
     run_command("TRUNCATE TABLE order_simulation_effects")
     
-    # 4. Get all pending Customer Orders sorted by due date
-    orders_df = run_query("SELECT * FROM customer_orders WHERE status IN ('Bekleniyor', 'Üretimde') ORDER BY expected_delivery_date ASC, id ASC")
-    
-    if orders_df.empty:
-        logger.info("No pending orders to simulate.")
-        return []
-        
     warnings = []
     
-    # 5. Process each order
-    for _, order in orders_df.iterrows():
-        try:
-             set_current_order_id(order['id'])
-             due_date = order['expected_delivery_date'] or order['order_date']
-             # Manuel override: sipariş formundan girilen üretim süresi varsa onu ilet
-             prod_time_override = int(order['production_time_days']) if order['production_time_days'] else None
-             
-             process_demand(order['item_id'], float(order['amount']), due_date, prod_time_override)
-        except Exception as e:
-             logger.error(f"Error simulating order {order['id']}: {e}")
-             warnings.append({"order_id": order['id'], "error": str(e)})
-        finally:
-             clear_current_order_id()
-             
-    # 6. Check for missing suppliers after all simulation
+    # 4. GERÇEK MÜŞTERİ SİPARİŞLERİ (Real Demand)
+    orders_df = run_query("SELECT * FROM customer_orders WHERE status IN ('Bekleniyor', 'Üretimde') ORDER BY expected_delivery_date ASC, id ASC")
+    
+    if not orders_df.empty:
+        for _, order in orders_df.iterrows():
+            try:
+                 set_current_order_id(order['id'])
+                 due_date = order['expected_delivery_date'] or order['order_date']
+                 prod_time_override = int(order['production_time_days']) if order['production_time_days'] else None
+                 
+                 process_demand(order['item_id'], float(order['amount']), due_date, prod_time_override)
+            except Exception as e:
+                 logger.error(f"Error simulating order {order['id']}: {e}")
+                 warnings.append({"order_id": order['id'], "error": str(e)})
+            finally:
+                 clear_current_order_id()
+    
+    # 5. TAHMİN TÜKETİMİ (Forecast Consumption)
+    try:
+        forecast_df = run_query("""
+            SELECT item_id, date, amount
+            FROM prophet_table_history
+            WHERE is_approved = TRUE AND date >= date_trunc('month', CURRENT_DATE)
+        """)
+        
+        if not forecast_df.empty:
+            logger.info(f"Processing Forecast Consumption for {len(forecast_df)} forecast records...")
+            
+            # Gerçek siparişleri aylara göre grupla
+            if not orders_df.empty:
+                orders_df['month_key'] = pd.to_datetime(orders_df['expected_delivery_date'].fillna(orders_df['order_date'])).dt.to_period('M')
+                orders_df['amount_float'] = orders_df['amount'].astype(float)
+                real_demand = orders_df.groupby(['item_id', 'month_key'])['amount_float'].sum().reset_index()
+            else:
+                real_demand = pd.DataFrame(columns=['item_id', 'month_key', 'amount_float'])
+                
+            for _, f_row in forecast_df.iterrows():
+                item_id = f_row['item_id']
+                f_date = pd.to_datetime(f_row['date'])
+                f_month = f_date.to_period('M')
+                f_amount = float(f_row['amount'])
+                
+                # Bu ay için gerçekleşen siparişi bul
+                matched = real_demand[(real_demand['item_id'] == item_id) & (real_demand['month_key'] == f_month)]
+                consumed = float(matched['amount_float'].sum()) if not matched.empty else 0.0
+                
+                remaining_forecast = f_amount - consumed
+                
+                if remaining_forecast > 0:
+                    try:
+                        due_date = f_date.date()
+                        logger.info(f"Simulating unconsumed forecast for {item_id}: {remaining_forecast} units on {due_date}")
+                        set_current_order_id(f"TAHMİN-{f_month}")
+                        process_demand(item_id, remaining_forecast, due_date, None)
+                    except Exception as e:
+                        logger.error(f"Error simulating forecast for {item_id}: {e}")
+                    finally:
+                        clear_current_order_id()
+    except Exception as e:
+        logger.error(f"Forecast Consumption Error: {e}")
+
+    # 6. GÜVENLİK STOĞU TAMAMLAMASI (Safety Stock Replenishment)
+    # Yukarıdaki işlemler sonrası planned_stock < 0 ise, o ürün güvenlik stoğunun altına düşmüş veya
+    # hiç stok olmadan sipariş edilmeye çalışılmış demektir.
+    try:
+        negative_stock_df = run_query("SELECT item_id, planned_stock FROM planned_inventory WHERE planned_stock < 0")
+        if not negative_stock_df.empty:
+            logger.info(f"Triggering automatic replenishments for {len(negative_stock_df)} items dropping below safety stock.")
+            for _, row in negative_stock_df.iterrows():
+                item_id = row['item_id']
+                # required_amount'u 0 geçerek `current_planned`ın - değerini tam olarak kapatacak siparişi açtırıyoruz!
+                try:
+                    set_current_order_id("GÜVENLİK_STOĞU")
+                    process_demand(item_id, 0.0, date.today(), None)
+                except Exception as e:
+                    logger.error(f"Error replenishing safety stock for {item_id}: {e}")
+                finally:
+                    clear_current_order_id()
+    except Exception as e:
+        logger.error(f"Safety Stock Replenishment Error: {e}")
+
+    # 7. Check for missing suppliers after all simulation
     missing = get_missing_suppliers()
     if missing:
          for item in missing:

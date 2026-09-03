@@ -52,21 +52,13 @@ def update_customer_order(order_id: int, updates: dict):
             if current_order['status'] != 'Sevk Edildi':
                 delivery_date = updated_order['delivery_date'] or date.today()
                 
-                # DB_HELPER'DAN DEGIL YENI METHODDAN EKLENECEK HAREKET
-                # Ancak burada ayni transaksiyonda yapmak isterseniz cur kullanarak yapalim (ya da add_stock_movement cagiralim)
+                # Stok hareketi oluştur — DB trigger (update_active_inventory) stoku otomatik düşer
                 cur.execute(
-                    "INSERT INTO stock_movement (item_id, amount, purpose, date, order_id, source_location_id, status) VALUES (%s, %s, %s, %s, %s, 'ANA_DEPO', 'Tamamlandı')",
+                    "INSERT INTO stock_movement (item_id, amount, purpose, date, order_id, source_location_id, target_location_id, is_completed) VALUES (%s, %s, %s, %s, %s, 'ANA_DEPO', NULL, TRUE)",
                     (updated_order['item_id'], float(updated_order['amount']), 'satış_çıkışı', delivery_date, order_id)
                 )
-                
-                # Active inventory guncelle
-                cur.execute("""
-              INSERT INTO active_inventory (item_id, current_stock, last_updated)
-              VALUES (%s, %s, CURRENT_TIMESTAMP)
-              ON CONFLICT (item_id) DO UPDATE SET 
-                   current_stock = active_inventory.current_stock - EXCLUDED.current_stock,
-                   last_updated = CURRENT_TIMESTAMP
-                """, (updated_order['item_id'], float(updated_order['amount'])))
+                # NOT: active_inventory güncellemesi DB trigger'ı tarafından otomatik yapılır.
+                # Manuel güncelleme YAPMIYORUZ — çift stok düşümünü önlemek için.
 
             conn.commit()
         else:

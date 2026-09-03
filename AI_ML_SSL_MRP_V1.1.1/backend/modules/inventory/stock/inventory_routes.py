@@ -25,11 +25,31 @@ def get_inventory(page: int = 1, limit: int = 50, search: Optional[str] = None, 
         handle_db_error(e)
 
 
+@router.put("/api/inventory/update")
+def update_inventory_batch_or_body(body: InventoryUpdate):
+    try:
+        item_id = body.item_id
+        if not item_id:
+            return {"status": "error", "message": "item_id belirtilmedi"}
+        target_stock = body.current_stock if body.current_stock is not None else body.amount
+        if target_stock is None:
+            return {"status": "error", "message": "current_stock veya amount belirtilmedi"}
+        current_amount = get_current_stock(item_id)
+        diff = target_stock - current_amount
+        update_active_inventory_amount(item_id, diff)
+        return {"status": "success", "message": f"{item_id} stoğu güncellendi. Fark: {diff}"}
+    except Exception as e:
+        handle_db_error(e)
+
+
 @router.put("/api/inventory/{item_id}")
 def update_inventory_route(item_id: str, body: InventoryUpdate):
     try:
+        target_stock = body.current_stock if body.current_stock is not None else body.amount
+        if target_stock is None:
+            return {"status": "error", "message": "current_stock veya amount belirtilmedi"}
         current_amount = get_current_stock(item_id)
-        diff = body.current_stock - current_amount
+        diff = target_stock - current_amount
         update_active_inventory_amount(item_id, diff)
         return {"status": "success", "message": f"{item_id} stoğu güncellendi. Fark: {diff}"}
     except Exception as e:

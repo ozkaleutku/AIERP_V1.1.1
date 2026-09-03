@@ -3,15 +3,17 @@ from backend.database.db_helper import run_command
 
 def update_active_inventory_amount(item_id: str, diff: float):
     """
-    active_inventory tablosunu günceller. Kayıt yoksa ekler, varsa miktarı DIFF kadar artırır.
-    Not: Bu fonksiyon stok düzeltmeleri veya manuel işlemler için faydalıdır,
-    ancak ana stok değişim mekanizması 'mark_movement_completed' üzerinden olmalıdır.
+    Manuel stok düzeltmeleri için kullanılır.
+    Doğrudan active_inventory güncellemek yerine 'düzeltme' (correction) hareketi ekler.
+    Veritabanındaki trigger (trigger_update_active_inventory) bu hareket üzerinden active_inventory'i otomatik günceller.
     """
-    query = """
-    INSERT INTO active_inventory (item_id, current_stock, last_updated)
-    VALUES (%s, %s, CURRENT_TIMESTAMP)
-    ON CONFLICT (item_id) DO UPDATE SET 
-        current_stock = active_inventory.current_stock + EXCLUDED.current_stock,
-        last_updated = CURRENT_TIMESTAMP
-    """
-    return run_command(query, (item_id, diff))
+    from backend.modules.inventory.movements.movement_creator import add_stock_movement
+    from datetime import date
+    
+    # Düzeltme hareketleri ANA_DEPO bazlı varsayılır
+    if diff > 0:
+        return add_stock_movement(item_id, diff, 'düzeltme_giriş', date.today(), target_location='ANA_DEPO', status='Tamamlandı')
+    elif diff < 0:
+        return add_stock_movement(item_id, abs(diff), 'düzeltme_çıkış', date.today(), source_location='ANA_DEPO', status='Tamamlandı')
+    
+    return None

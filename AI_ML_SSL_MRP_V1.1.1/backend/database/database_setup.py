@@ -196,31 +196,35 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS prophet_table_history (
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
-            amount DECIMAL(12, 2),
-            yhat_lower DECIMAL(12, 2),
-            yhat_upper DECIMAL(12, 2),
+            amount DECIMAL(18, 5),
+            yhat_lower DECIMAL(18, 5),
+            yhat_upper DECIMAL(18, 5),
+            is_approved BOOLEAN DEFAULT FALSE,
             PRIMARY KEY (item_id, date)
         )
         """,
+        "ALTER TABLE prophet_table_history ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE",
         
         # 7. prophet_table_temporary
         """
         CREATE TABLE IF NOT EXISTS prophet_table_temporary (
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
-            amount DECIMAL(12, 2),
-            yhat_lower DECIMAL(12, 2),
-            yhat_upper DECIMAL(12, 2),
+            amount DECIMAL(18, 5),
+            yhat_lower DECIMAL(18, 5),
+            yhat_upper DECIMAL(18, 5),
+            is_approved BOOLEAN DEFAULT FALSE,
             PRIMARY KEY (item_id, date)
         )
         """,
+        "ALTER TABLE prophet_table_temporary ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE",
         
         # 8. ss_ai_history
         """
         CREATE TABLE IF NOT EXISTS ss_ai_history (
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
-            amount DECIMAL(12, 2),
+            amount DECIMAL(18, 5),
             PRIMARY KEY (item_id, date)
         )
         """,
@@ -230,8 +234,34 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS ss_ai_temporary (
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
-            amount DECIMAL(12, 2),
+            amount DECIMAL(18, 5),
             PRIMARY KEY (item_id, date)
+        )
+        """,
+
+        # 9.1. safety_stock_plan (Unified AI+Formula+Manual Table — Reference Repo Aligned)
+        """
+        CREATE TABLE IF NOT EXISTS safety_stock_plan (
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            date DATE,
+            ai_amount DECIMAL(18, 5) DEFAULT 0,
+            formula_amount DECIMAL(18, 5) DEFAULT 0,
+            manual_amount DECIMAL(18, 5),
+            is_approved BOOLEAN DEFAULT FALSE,
+            item_type item_type_enum,
+            item_quantity_type quantity_type_enum,
+            PRIMARY KEY (item_id, date)
+        )
+        """,
+
+        # 9.1.5. safety_stock_history (Historical Approved Values — Reference Repo Aligned)
+        """
+        CREATE TABLE IF NOT EXISTS safety_stock_history (
+            id SERIAL PRIMARY KEY,
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            date DATE,
+            safety_amount DECIMAL(18, 5),
+            UNIQUE (item_id, date)
         )
         """,
 
@@ -239,7 +269,7 @@ def create_tables():
         """
         CREATE TABLE IF NOT EXISTS final_safety_stock (
             item_id VARCHAR(20) REFERENCES item(item_id),
-            safety_stock DECIMAL(12, 2) DEFAULT 0,
+            safety_stock DECIMAL(18, 5) DEFAULT 0,
             item_quantity_type quantity_type_enum,
             preference VARCHAR(20) DEFAULT 'AI',
             date DATE,
@@ -252,7 +282,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS calculated_full_ss_ai_temp (
             item_id VARCHAR(20) REFERENCES item(item_id),
             date DATE,
-            amount DECIMAL(12, 2),
+            amount DECIMAL(18, 5),
             status VARCHAR(20),
             item_type item_type_enum,
             item_quantity_type quantity_type_enum,
@@ -859,6 +889,16 @@ def create_tables():
         EXECUTE FUNCTION update_active_inventory();
         """,
         
+        # 18.5. start_inventories (For Monthly Snapshots)
+        """
+        CREATE TABLE IF NOT EXISTS start_inventories (
+            item_id VARCHAR(20) REFERENCES item(item_id),
+            date DATE,
+            amount DECIMAL(12, 2) DEFAULT 0,
+            PRIMARY KEY (item_id, date)
+        )
+        """,
+
         # 19. Trigger: Monthly Snapshot (Start Inventories) with Gap Filling
         """
         CREATE OR REPLACE FUNCTION record_monthly_snapshot() RETURNS TRIGGER AS $$
@@ -871,8 +911,8 @@ def create_tables():
             -- 1. Calculate 1st day of the month for the NEW movement
             target_month := DATE_TRUNC('month', NEW.date)::DATE;
             
-            -- 2. Fetch current stock (carry-over from prev month)
-            SELECT current_stock INTO current_inv 
+            -- 2. Fetch current stock (sum of all locations)
+            SELECT SUM(current_stock) INTO current_inv 
             FROM active_inventory 
             WHERE item_id = NEW.item_id;
             
@@ -994,8 +1034,8 @@ def create_tables():
                  try:
                     table_name = command.split("EXISTS")[1].split("(")[0].strip()
                     logger.info(f"- {table_name}")
-                 except:
-                    pass
+                 except Exception as e:
+                    logger.warning(f"Could not parse table name from command: {e}")
             cur.execute(command)
 
         # Değişiklikleri kaydet

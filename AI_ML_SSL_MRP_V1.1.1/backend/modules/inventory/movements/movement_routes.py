@@ -44,8 +44,7 @@ def get_stock_movements(
 @router.post("/api/stock-movements")
 def create_stock_movement(body: StockMovementCreate):
     try:
-         # status her zaman Tamamlandı olarak gönderilir API'den manuel girişlerde
-         status = 'Tamamlandı'
+         # is_completed=TRUE for manual entries from API
          add_stock_movement(
              body.item_id, 
              body.amount, 
@@ -55,7 +54,7 @@ def create_stock_movement(body: StockMovementCreate):
              source_location=body.source_location_id,
              target_location=body.target_location_id,
              tracking_code=body.tracking_code,
-             status=status
+             status='Tamamlandı'
          )
          return {"status": "success"}
     except Exception as e:

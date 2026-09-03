@@ -48,9 +48,8 @@ def get_db_connection():
                 return conn
     except Exception as e:
         logger.error(f"Connection Pool Error: {e}")
-        print(f"DEBUG: Connection Pool Error: {e}")
     if not pg_pool:
-        print("DEBUG: pg_pool is None after init attempt")
+        logger.error("pg_pool is None after init attempt")
     return None
 
 def release_db_connection(conn):

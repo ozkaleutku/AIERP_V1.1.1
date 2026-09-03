@@ -6,7 +6,7 @@ from backend.logger import get_logger
 logger = get_logger(__name__)
 
 
-def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, source_location='ANA_DEPO', target_location='ANA_DEPO', status='Tamamlandı', tracking_code=None):
+def add_stock_movement(item_id, amount, purpose, movement_date, order_id=None, source_location=None, target_location=None, status='Tamamlandı', tracking_code=None):
     """
     Genel stok hareketi ekler.
     Eğer purpose = 'satın_alma_girişi' ise target_location='ANA_DEPO', source_location=NULL yapılır.

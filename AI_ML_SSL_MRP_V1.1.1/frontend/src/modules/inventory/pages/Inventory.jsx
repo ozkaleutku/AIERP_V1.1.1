@@ -210,8 +210,9 @@ const Inventory = () => {
 
     const saveEditing = async (itemId) => {
         try {
-            await api.put("/inventory/update", {
+            await api.put(`/inventory/${itemId}`, {
                 item_id: itemId,
+                current_stock: parseFloat(editAmount),
                 amount: parseFloat(editAmount)
             });
 

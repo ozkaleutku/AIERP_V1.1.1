@@ -9,6 +9,10 @@ def run_bom_explosion():
     Hedef yılın (önümüzdeki yılbaşı) tahminleri için BOM patlatma işlemini gerçekleştirir.
     Level-by-level (seviye bazlı) algoritma kullanır ve sonuçları
     `calculated_full_ss_ai_temp` tablosuna yazar.
+    
+    FIX: Artık çok-seviyeli patlatma (multi-level explosion) doğru çalışıyor.
+    Her seviyede sadece yeni eklenen child'lar bir sonraki iterasyon için
+    parent olarak kullanılır.
     """
     from datetime import datetime
     target_year = datetime.now().year + 1
@@ -17,11 +21,9 @@ def run_bom_explosion():
     # 1. Clear temporary calculation table
     run_command("TRUNCATE TABLE calculated_full_ss_ai_temp")
     
-    # 2. Level 0: Fetch raw AI predictions (which are mainly for finished goods, 
-    # but the AI engine predicts for everything based on past patterns)
+    # 2. Level 0: Fetch raw AI predictions
     logger.info(f"   -> Copying initial AI predictions (Level 0) for target year: {target_year}...")
     
-    # Sadece hedef yıla ait verileri kopyala
     insert_l0 = """
     INSERT INTO calculated_full_ss_ai_temp (item_id, item_type, item_quantity_type, date, amount, status)
     SELECT p.item_id, i.item_type, i.item_quantity_type, p.date, p.amount, i.activity_status
@@ -31,23 +33,24 @@ def run_bom_explosion():
     """
     run_command(insert_l0, (target_year,))
     
+    # 3. Level-by-level explosion
+    # Track which items were just exploded so we only process the DELTA in each loop
+    import pandas as pd
+    
+    # Get the initial set of parents (mamül + yarı_mamül)
+    query_initial = """
+    SELECT c.item_id, c.date, c.amount as current_amount
+    FROM calculated_full_ss_ai_temp c
+    JOIN item i ON c.item_id = i.item_id
+    WHERE i.item_type IN ('mamül', 'yarı_mamül')
+    """
+    df_current_level = run_query(query_initial)
+    
     level = 0
-    while level < 10:  # Safety break at level 10
+    while not df_current_level.empty and level < 10:
         logger.info(f"   -> Processing explosion for Level {level}...")
         
-        # Get all parents in current level
-        query_current = """
-        SELECT c.item_id, c.date, c.amount as current_amount
-        FROM calculated_full_ss_ai_temp c
-        JOIN item i ON c.item_id = i.item_id
-        WHERE i.item_type IN ('mamül', 'yarı_mamül')
-        """
-        df_current = run_query(query_current)
-        
-        if df_current.empty:
-            break
-            
-        parents_in_level = list(df_current['item_id'].unique())
+        parents_in_level = list(df_current_level['item_id'].unique())
         
         # Get BOM for these parents
         query_bom = """
@@ -61,7 +64,7 @@ def run_bom_explosion():
             break
             
         # Explode: current_required * bom_multiplier = child_required
-        df_merged = df_current.merge(df_bom, left_on='item_id', right_on='parent_id')
+        df_merged = df_current_level.merge(df_bom, left_on='item_id', right_on='parent_id')
         df_merged['child_amount'] = df_merged['current_amount'] * df_merged['bom_multiplier']
         
         # Group by child and date to sum up requirements from multiple parents
@@ -79,13 +82,13 @@ def run_bom_explosion():
         df_insert = df_next_level.merge(df_items, left_on='child_id', right_on='item_id')
         
         if df_insert.empty:
-             break
+            break
              
         # Insert or Add to temp table
         upsert_query = """
         INSERT INTO calculated_full_ss_ai_temp (item_id, item_type, item_quantity_type, date, amount, status)
         VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (item_id, date) DO UPDATE 
+        ON CONFLICT (item_id, date, status) DO UPDATE 
         SET amount = calculated_full_ss_ai_temp.amount + EXCLUDED.amount
         """
         
@@ -97,25 +100,20 @@ def run_bom_explosion():
              for _, row in df_insert.iterrows()
         ]
         
-        # Optimization: We only process the DELTA in the next loop to avoid double counting.
-        # But wait, logic above re-reads everything. 
-        # Correct logic: We should only explode newly added amounts.
-        # However, since this is a clean rebuild for SS prediction, we can just aggregate at the end.
-        # The while loop as implemented currently re-explodes everything. 
-        # For a true level-by-level, we should break out, this requires a refactor but 
-        # we will keep current logic for now, just batch execute it correctly.
-        
         run_command_batch(upsert_query, rows)
         
-        # In a real level-by-level, we must only explode the *newly generated* children 
-        # in the next iteration.
-        # So we update df_current to ONLY be df_next_level for the next iteration.
-        break # Breaking here because the original logic is slightly flawed for deep recursion, 
-              # it keeps exploding the top level. Let's fix it by relying on the recursive flow:
-              
-    logger.info("Prediction BOM Explosion completed!")
-
-    # NOTE ON REFACTOR: The above while loop is left simplified as per original code. 
-    # A true explosion needs to track *what was just exploded* to feed the next loop.
-    # We will refine this algorithm if needed in a future update, but keeping exact 
-    # behavior of the original file for now.
+        # KEY FIX: Only process newly generated children that are mamül/yarı_mamül
+        # in the next iteration (to avoid re-exploding top-level parents)
+        df_next_parents = df_insert[df_insert['item_type'].isin(['mamül', 'yarı_mamül'])].copy()
+        
+        if df_next_parents.empty:
+            break
+        
+        # Prepare next level: rename columns to match expected format
+        df_current_level = df_next_parents[['item_id', 'date', 'child_amount']].rename(
+            columns={'child_amount': 'current_amount'}
+        )
+        
+        level += 1
+               
+    logger.info(f"Prediction BOM Explosion completed! ({level + 1} levels processed)")

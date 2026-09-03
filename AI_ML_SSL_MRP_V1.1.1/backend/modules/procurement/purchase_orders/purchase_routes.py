@@ -57,7 +57,9 @@ def create_order(body: OrderCreate):
             body.amount, 
             body.unit_price, 
             body.expected_coming_date, 
-            body.currency
+            body.currency,
+            body.purchase_date,
+            body.purpose
         )
         return {"status": "success"}
     except Exception as e:

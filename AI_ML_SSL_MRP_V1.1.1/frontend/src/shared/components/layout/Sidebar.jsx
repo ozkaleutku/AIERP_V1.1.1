@@ -72,7 +72,7 @@ const Sidebar = () => {
 
             <div className="p-6 border-b border-gray-800 shrink-0 h-[73px] flex items-center justify-center overflow-hidden">
                 <h1 className={`font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent transition-all duration-300 whitespace-nowrap ${isCollapsed ? 'text-xl' : 'text-2xl'}`}>
-                    {isCollapsed ? 'OS-AI' : 'OptiStock AI'}
+                    {isCollapsed ? 'OS-AI' : 'AIERP'}
                 </h1>
             </div>
 

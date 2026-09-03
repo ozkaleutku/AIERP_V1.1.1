@@ -13,6 +13,7 @@ const NewOrderModal = ({ onClose, onSubmit }) => {
         item_id: "",
         supplier_id: "",
         amount: "",
+        unit_price: "",
         purpose: "normal_sipariş",
         purchase_date: new Date().toISOString().split("T")[0],
         expected_coming_date: "",
@@ -97,7 +98,8 @@ const NewOrderModal = ({ onClose, onSubmit }) => {
         if (isSubmitDisabled) return;
         onSubmit({
             ...formData,
-            amount: parseFloat(formData.amount)
+            amount: parseFloat(formData.amount),
+            unit_price: parseFloat(formData.unit_price) || 0
         });
     };
 
@@ -185,6 +187,14 @@ const NewOrderModal = ({ onClose, onSubmit }) => {
                                     value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })}
                                 />
                                 {amountError && <p className="text-xs text-red-600 font-medium mt-1">{amountError}</p>}
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Birim Fiyat</label>
+                                <input type="number" step="any" min="0"
+                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                                    value={formData.unit_price} onChange={e => setFormData({ ...formData, unit_price: e.target.value })}
+                                    placeholder="0.00"
+                                />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Amaç</label>
@@ -334,8 +344,8 @@ const Orders = () => {
     const handleConfirmArrival = async (orderId) => {
         if (!editArrivalDate) return;
         try {
-            await api.put("/orders/receive", {
-                id: orderId,
+            await api.put(`/orders/${orderId}`, {
+                status: "Geldi",
                 actual_coming_date: editArrivalDate
             });
 

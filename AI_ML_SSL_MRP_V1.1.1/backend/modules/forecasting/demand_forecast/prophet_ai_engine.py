@@ -14,7 +14,7 @@ logging.getLogger('prophet').setLevel(logging.WARNING)
 
 def run_prophet_by_item(item_id, target_year):
     """Tek bir ürün için Prophet tahminini çalıştırır ve sonucu döner."""
-    
+    # 1. Pull data (monthly total)
     query = """
     SELECT date_trunc('month', date) as ds, SUM(amount) as y 
     FROM sales_out_history 
@@ -25,38 +25,37 @@ def run_prophet_by_item(item_id, target_year):
     df = run_query(query, (item_id,))
     
     if df.empty or len(df) < 5: 
-        logger.warning(f"Skipping {item_id}: Yetersiz veri ({len(df)} kayıt)")
+        logger.warning(f"Skipping {item_id}: Insufficient data ({len(df)} records)")
         return []
 
-    # Tarihi datetime formatına çevir
+    # convert date to datetime format (remove timezone info - Prophet needs timezone-naive)
     df['ds'] = pd.to_datetime(df['ds']).dt.tz_localize(None)
-    
-    # EKSİK AYLARI SIFIR İLE DOLDURMA KODU (Resampling)
-    # Hiç satışın olmadığı aylarda "0" değerinin veritabanına eklenmesi gibi çalışır.
-    df = df.sort_values('ds').set_index('ds')
-    df = df.resample('MS').sum().fillna(0).reset_index()
 
     try:
+        # 2. Train model
         model = Prophet(
             yearly_seasonality=True,
             weekly_seasonality=False,
             daily_seasonality=False,
-            changepoint_prior_scale=0.1  # 0.01 den 0.1 e çıkarıldı: Trend son değişikliklere daha agresif uyar
+            changepoint_prior_scale=0.01
         )
         model.fit(df)
         
+        # 3. Create future year's calendar
         start_date = datetime(target_year, 1, 1)
         future_dates = pd.date_range(start=start_date, periods=12, freq='MS')
         future = pd.DataFrame({'ds': future_dates})
         
+        # 4. Make forecast
         forecast = model.predict(future)
         
+        # 5. Prepare Results (with yhat_lower and yhat_upper)
         results = []
         for _, row in forecast.iterrows():
             pred_value = max(0, row['yhat'])
             lower = max(0, row['yhat_lower'])
             upper = max(0, row['yhat_upper'])
-            results.append((item_id, row['ds'].date(), round(pred_value, 2), round(lower, 2), round(upper, 2)))
+            results.append((item_id, row['ds'].date(), round(pred_value, 5), round(lower, 5), round(upper, 5)))
             
         return results
 
@@ -65,12 +64,16 @@ def run_prophet_by_item(item_id, target_year):
         return []
 
 def run_full_analysis():
-    """Sistemdeki tüm ürünler için tahmini çalıştırır ve DB'ye yazar."""
-    logger.info("Prophet Analizi Başlıyor...")
+    """
+    Sistemdeki tüm ürünler için tahmini çalıştırır ve veritabanına yazar.
+    """
+    logger.info("Prophet Analysis Started...")
     
+    # next year
     target_year = datetime.now().year + 1
-    logger.info(f"Hedef Yıl: {target_year}")
+    logger.info(f"Target Year: {target_year}")
 
+    # 1. Get unique items
     items_df = run_query("SELECT DISTINCT item_id FROM sales_out_history")
     items = items_df['item_id'].tolist()
     
@@ -78,6 +81,7 @@ def run_full_analysis():
         logger.warning("Analiz edilecek geçmiş veri bulunamadı.")
         return
 
+    # 2. Forecast per item (in memory)
     logger.info("Tahminler hesaplanıyor...")
     all_forecasts = []
     for item_id in items:
@@ -89,19 +93,23 @@ def run_full_analysis():
         logger.warning("Tahmin üretilemedi.")
         return
 
-    logger.info(f"Toplam {len(all_forecasts)} aylık tahmin üretildi. DB güncelleniyor...")
+    logger.info(f"Toplam {len(all_forecasts)} aylık tahmin üretildi. Veritabanı güncelleniyor...")
 
-    # A. Mevcut verileri history tablosuna yedekle (eğer onaylanmamışsa)
+    # 3. Database Operations (Transaction-like security)
+    # A. Backup current data to history table
+    logger.info("Backing up current temporary data to history table...")
     run_command("""
     INSERT INTO prophet_table_history (item_id, date, amount, yhat_lower, yhat_upper)
     SELECT item_id, date, amount, yhat_lower, yhat_upper FROM prophet_table_temporary
     ON CONFLICT (item_id, date) DO NOTHING
     """)
 
-    # B. Temizle
+    # B. Clear Temporary Table
+    logger.info("Clearing temporary table...")
     run_command("TRUNCATE TABLE prophet_table_temporary")
 
-    # C. Yeni tahminleri kaydet
+    # C. Save New Data
+    logger.info("Saving new forecasts...")
     insert_query = """
     INSERT INTO prophet_table_temporary (item_id, date, amount, yhat_lower, yhat_upper)
     VALUES (%s, %s, %s, %s, %s)

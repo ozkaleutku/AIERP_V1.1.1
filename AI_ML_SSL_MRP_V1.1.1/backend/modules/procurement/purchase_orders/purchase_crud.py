@@ -1,12 +1,12 @@
 from backend.database.db_helper import run_query, run_command
 
 
-def create_purchase_order(item_id, supplier_id, amount, unit_price, expected_coming_date=None, currency="TRY"):
+def create_purchase_order(item_id, supplier_id, amount, unit_price, expected_coming_date=None, currency="TRY", purchase_date=None, purpose="normal_sipariş"):
     query = """
-    INSERT INTO purchase (item_id, supplier_id, amount, unit_price, expected_coming_date)
-    VALUES (%s, %s, %s, %s, %s)
+    INSERT INTO purchase (item_id, supplier_id, amount, unit_price, purchase_date, expected_coming_date, purpose)
+    VALUES (%s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s, %s)
     """
-    params = (item_id, supplier_id, amount, unit_price, expected_coming_date)
+    params = (item_id, supplier_id, amount, unit_price, purchase_date, expected_coming_date, purpose)
     return run_command(query, params)
 
 def search_purchase_orders(item_id=None, supplier_id=None, status=None, limit=None, offset=None):

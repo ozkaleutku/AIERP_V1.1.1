@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 from backend.config import CORS_ORIGINS
 
-app = FastAPI(title="OptiStock AI - ERP MRP System")
+app = FastAPI(title="AIERP - ERP MRP System")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +45,7 @@ except ImportError as e:
 
 @app.get("/")
 def read_root():
-    return {"message": "OptiStock AI - ERP MRP System API is Running (Modular)"}
+    return {"message": "AIERP - ERP MRP System API is Running (Modular)"}
 
 
 from backend.config import API_PORT, API_HOST, API_RELOAD

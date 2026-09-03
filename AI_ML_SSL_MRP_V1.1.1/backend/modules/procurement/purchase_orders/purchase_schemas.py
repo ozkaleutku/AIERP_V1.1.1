@@ -6,9 +6,11 @@ class OrderCreate(BaseModel):
     item_id: str
     supplier_id: str
     amount: float
-    unit_price: float
+    unit_price: Optional[float] = 0
     currency: Optional[str] = "TRY"
+    purchase_date: Optional[date] = None
     expected_coming_date: Optional[date] = None
+    purpose: Optional[str] = "normal_sipariş"
 
 class OrderEdit(BaseModel):
     supplier_id: Optional[str] = None

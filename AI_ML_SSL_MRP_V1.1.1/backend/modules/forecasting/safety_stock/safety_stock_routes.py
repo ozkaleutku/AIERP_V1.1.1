@@ -1,7 +1,7 @@
-from fastapi import APIRouter, BackgroundTasks
-from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, Body
+from typing import Optional, Union, List
 
-from backend.modules.forecasting.safety_stock.safety_stock_schemas import SafetyStockApprovalPlan
+from backend.modules.forecasting.safety_stock.safety_stock_schemas import SafetyStockApprovalPlan, ApprovalItem
 from backend.modules.forecasting.safety_stock.safety_stock_query import get_calculated_safety_stock_temp, get_kings_formula_results, get_all_active_safety_stock, get_final_safety_stock, get_safety_stock_detail
 from backend.modules.forecasting.safety_stock.safety_stock_approver import approve_safety_stock_plan
 from backend.modules.forecasting.safety_stock.historical_consumption_builder import run_historical_bom_explosion_v2
@@ -54,10 +54,11 @@ def get_safety_stock_proposals():
         handle_db_error(e)
 
 @router.post("/api/safety-stock/approve")
-def approve_safety_stock(plan: SafetyStockApprovalPlan):
+def approve_safety_stock(plan: Union[SafetyStockApprovalPlan, List[ApprovalItem]] = Body(...)):
     """Kullanıcının seçtiği/revize ettiği planı kalıcı tabloya aktarır."""
     try:
-         approved_count = approve_safety_stock_plan(plan.items)
+         items = plan if isinstance(plan, list) else plan.items
+         approved_count = approve_safety_stock_plan(items)
          return {"status": "success", "message": f"{approved_count} adet kayıt başarıyla onaylandı."}
     except Exception as e:
          handle_db_error(e)
